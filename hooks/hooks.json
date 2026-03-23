@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "INPUT=$(cat); AGENT=$(echo \"$INPUT\" | jq -r '.tool_input.subagent_type // .tool_input.name // \"agent\"'); DESC=$(echo \"$INPUT\" | jq -r '.tool_input.description // \"\"'); echo '{\"ts\":\"'$(date -Iseconds)'\",\"agent\":\"orchestrator\",\"event\":\"spawn\",\"detail\":\"'\"$AGENT\"': '\"$DESC\"'\"}' >> .claude/team/activity.jsonl 2>/dev/null"
+            "command": "INPUT=$(cat); AGENT=$(echo \"$INPUT\" | jq -r '.tool_input.subagent_type // .tool_input.name // \"agent\"'); DESC=$(echo \"$INPUT\" | jq -r '.tool_input.description // \"\"'); jq -nc --arg ts \"$(date -Iseconds)\" --arg detail \"$AGENT: $DESC\" '{ts:$ts,agent:\"orchestrator\",event:\"spawn\",detail:$detail}' >> .claude/team/activity.jsonl 2>/dev/null"
           }
         ]
       }
