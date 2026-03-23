@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <title>brains-in-a-hat | Agent Dashboard</title>
 <style>
 /* ------------------------------------------------------------------ */
@@ -400,8 +402,8 @@ header h1 span {
     // Constants
     // ----------------------------------------------------------------
     var CLUSTER_X_AGENT = 0;
-    var CLUSTER_X_FILE  = -200;
-    var CLUSTER_X_VAULT = 200;
+    var CLUSTER_X_FILE  = -350;
+    var CLUSTER_X_VAULT = 350;
 
     var AGENT_ACTIVE_COLOR = "#58a6ff";
     var AGENT_IDLE_COLOR   = "#484f58";
@@ -535,7 +537,7 @@ header h1 span {
             status: "idle",
             action: "",
             color: AGENT_IDLE_COLOR,
-            size: 6,
+            size: 16,
             fx: CLUSTER_X_AGENT + (Math.random() - 0.5) * 60,
             fy: undefined,
             fz: undefined
@@ -558,7 +560,7 @@ header h1 span {
             group: "file",
             ext: ext,
             color: fileColor(filePath),
-            size: 3,
+            size: 8,
             fx: CLUSTER_X_FILE + (Math.random() - 0.5) * 80,
             fy: undefined,
             fz: undefined
@@ -582,7 +584,7 @@ header h1 span {
             group: "vault",
             vaultType: type,
             color: vaultColor(type),
-            size: 4,
+            size: 10,
             fx: CLUSTER_X_VAULT + (Math.random() - 0.5) * 80,
             fy: undefined,
             fz: undefined
@@ -646,7 +648,7 @@ header h1 span {
             case "start":
                 agentNode.status = "active";
                 agentNode.color = AGENT_ACTIVE_COLOR;
-                agentNode.size = 8;
+                agentNode.size = 20;
                 agentNode.action = ev.detail || "started";
 
                 // Look for orchestrator in detail (e.g. "spawned by tech-lead")
@@ -664,7 +666,7 @@ header h1 span {
             case "done":
                 agentNode.status = "done";
                 agentNode.color = AGENT_DONE_COLOR;
-                agentNode.size = 6;
+                agentNode.size = 16;
                 agentNode.action = ev.detail || "finished";
                 break;
 
@@ -673,7 +675,7 @@ header h1 span {
             case "edit":
                 agentNode.status = "active";
                 agentNode.color = AGENT_ACTIVE_COLOR;
-                agentNode.size = 8;
+                agentNode.size = 20;
                 agentNode.action = ev.event + ": " + (ev.detail || "");
 
                 if (ev.detail) {
@@ -699,7 +701,7 @@ header h1 span {
             case "SendMessage":
                 agentNode.status = "active";
                 agentNode.color = AGENT_ACTIVE_COLOR;
-                agentNode.size = 8;
+                agentNode.size = 20;
                 agentNode.action = "messaging";
 
                 if (ev.detail) {
@@ -821,11 +823,11 @@ header h1 span {
         // Label sprite
         var canvas = document.createElement("canvas");
         var ctx = canvas.getContext("2d");
-        var fontSize = node.group === "agent" ? 28 : 22;
-        canvas.width = 512;
-        canvas.height = 64;
+        var fontSize = node.group === "agent" ? 48 : 36;
+        canvas.width = 1024;
+        canvas.height = 128;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.font = (node.group === "agent" ? "bold " : "") + fontSize + "px -apple-system, sans-serif";
+        ctx.font = (node.group === "agent" ? "bold " : "") + fontSize + "px 'JetBrains Mono', 'SF Mono', 'Fira Code', Consolas, monospace";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillStyle = isHighlighted ? "rgba(230,237,243," + opacity + ")" : "rgba(230,237,243,0.15)";
@@ -839,9 +841,9 @@ header h1 span {
             depthTest: false
         });
         var sprite = new T.Sprite(spriteMat);
-        var labelScale = node.group === "agent" ? 40 : 30;
+        var labelScale = node.group === "agent" ? 80 : 50;
         sprite.scale.set(labelScale, labelScale * (canvas.height / canvas.width), 1);
-        sprite.position.set(0, -(node.size + 6), 0);
+        sprite.position.set(0, -(node.size + 10), 0);
         group.add(sprite);
 
         return group;
@@ -917,7 +919,7 @@ header h1 span {
             });
 
         // ---- Forces ----
-        graph.d3Force("charge").strength(-30);
+        graph.d3Force("charge").strength(-80);
         graph.d3Force("link").distance(function(link) {
             if (link.edgeType === "agent-agent") return 40;
             if (link.edgeType === "spawn") return 30;
@@ -950,7 +952,7 @@ header h1 span {
         graph.graphData({ nodes: state.nodes, links: state.links });
 
         // Initial camera position
-        graph.cameraPosition({ x: 0, y: 0, z: 350 });
+        graph.cameraPosition({ x: 0, y: 0, z: 500 });
     }
 
     // ----------------------------------------------------------------
