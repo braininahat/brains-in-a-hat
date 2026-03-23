@@ -6,7 +6,18 @@
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "You are the session-manager agent. Produce a session briefing by reading memory files, git status, open issues, and team state. Keep it under 20 lines."
+            "prompt": "You are the session-manager agent. First, check if .claude/team/initialized exists. If it does NOT exist, run the First Run onboarding flow (see your instructions) before producing the briefing. If it does exist, skip onboarding and produce a session briefing by reading memory files, git status, open issues, and team state. Keep it under 20 lines."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); AGENT=$(echo \"$INPUT\" | jq -r '.tool_input.subagent_type // .tool_input.name // \"agent\"'); DESC=$(echo \"$INPUT\" | jq -r '.tool_input.description // \"\"'); echo '{\"ts\":\"'$(date -Iseconds)'\",\"agent\":\"orchestrator\",\"event\":\"spawn\",\"detail\":\"'\"$AGENT\"': '\"$DESC\"'\"}' >> .claude/team/activity.jsonl 2>/dev/null"
           }
         ]
       }
