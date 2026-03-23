@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "You are the session-manager agent. Produce a session briefing by reading memory files, git status, open issues, and team state. Keep it under 20 lines."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); CMD=$(echo \"$INPUT\" | jq -r '.tool_input.command // empty'); if echo \"$CMD\" | grep -qE '^git commit'; then if [ ! -f .claude/team/qa-approved ]; then echo '{\"decision\": \"block\", \"reason\": \"QA Engineer has not approved. Run /team-review first.\"}'; else rm -f .claude/team/qa-approved; fi; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

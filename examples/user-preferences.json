@@ -1,0 +1,47 @@
+{
+  "_comment": "Example user preferences file. Copy to .claude/team/user-preferences.json and customize. Meta Agent also learns and updates this file over time.",
+  "_safety": "This file should NEVER contain passwords, tokens, API keys, or information that could be harmful if leaked. Meta Agent will refuse to store sensitive data.",
+  "engineering": {
+    "always_fix_root_causes": true,
+    "no_quick_hacks": true,
+    "principled_over_simple": true
+  },
+  "communication": {
+    "frame_choices_as_tradeoffs": true,
+    "walk_through_each_change": true,
+    "never_commit_without_asking": true,
+    "test_before_claiming_fixed": true
+  },
+  "tools": {
+    "package_manager": "uv",
+    "install_command": "uv add",
+    "run_command": "uv run",
+    "build_script": "packaging/docker-build.sh",
+    "test_command": "uv run pytest -x -q"
+  },
+  "threading": {
+    "prefer": "QThread",
+    "note": "Use Qt threading primitives in Qt apps, not Python threading.Thread"
+  },
+  "subagents": {
+    "minimum_model": "sonnet",
+    "never_use": ["haiku"]
+  },
+  "professional_context": {
+    "_comment": "Meta Agent learns and updates this section. Helps with proactive suggestions like paper opportunities, deadline reminders, and attribution.",
+    "name": "",
+    "role": "",
+    "responsibilities": [],
+    "deadlines": [],
+    "collaborators": [],
+    "publication_interests": [],
+    "attribution_name": ""
+  },
+  "proactive_suggestions": {
+    "paper_opportunities": true,
+    "deadline_reminders": true,
+    "attribution_checks": true,
+    "novelty_detection": true,
+    "_note": "Meta Agent will suggest when work could become a paper, remind about deadlines, ensure proper attribution, and flag novel contributions."
+  }
+}

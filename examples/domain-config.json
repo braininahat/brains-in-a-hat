@@ -1,0 +1,29 @@
+{
+  "_comment": "Example domain configuration for a clinical speech pathology project. Copy to .claude/team/domain-config.json and customize for your domain.",
+  "domain": "speech-language pathology",
+  "key_concepts": [
+    "phoneme scoring",
+    "elicitation protocols",
+    "assessment workflows",
+    "tongue ultrasound imaging",
+    "articulation therapy"
+  ],
+  "compliance": [
+    "HIPAA",
+    "data on-premise only",
+    "no cloud storage of patient data"
+  ],
+  "terminology": {
+    "SLP": "Speech-Language Pathologist",
+    "phoneme mastery": "consistently producing a sound correctly (score >= 4/5) across multiple attempts",
+    "elicitation": "structured process of prompting a child to produce target words for assessment",
+    "calibration": "initial phase where the system learns the subject's resting tongue position"
+  },
+  "validation_rules": [
+    "Scores must not be visible to the subject during live assessment (avoid biasing)",
+    "All patient data stays on-premise (HIPAA requirement)",
+    "Assessment protocols follow published clinical standards",
+    "Manual SLP mode must capture only the child's speech, not the SLP's voice",
+    "Phoneme mastery thresholds: mastered >= 4.0 avg AND min >= 3, struggling < 3.0 avg OR any <= 1"
+  ]
+}
