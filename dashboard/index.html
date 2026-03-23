@@ -25,44 +25,60 @@
     --purple:    #bc8cff;
     --orange:    #f0883e;
     --cyan:      #39d2c0;
-    --radius:    6px;
+    --pink:      #db61a2;
+    --gold:      #e3b341;
+    --teal:      #56d4dd;
     --font:      -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     --mono:      "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
 }
 
-body {
+html, body {
     font-family: var(--font);
     background: var(--bg);
     color: var(--text);
-    line-height: 1.5;
-    min-height: 100vh;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
 }
 
 /* ------------------------------------------------------------------ */
-/* Layout                                                              */
+/* Graph container (full viewport)                                     */
 /* ------------------------------------------------------------------ */
-.app {
-    display: grid;
-    grid-template-rows: auto 1fr;
-    grid-template-columns: 1fr 400px;
-    height: 100vh;
-    gap: 0;
+#graph-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
 }
 
+/* ------------------------------------------------------------------ */
+/* Header overlay                                                      */
+/* ------------------------------------------------------------------ */
 header {
-    grid-column: 1 / -1;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 10;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 20px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-card);
+    padding: 10px 20px;
+    background: linear-gradient(180deg, rgba(13,17,23,0.92) 0%, rgba(13,17,23,0.6) 80%, transparent 100%);
+    pointer-events: none;
+}
+
+header > * {
+    pointer-events: auto;
 }
 
 header h1 {
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 600;
     letter-spacing: -0.01em;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.5);
 }
 
 header h1 span {
@@ -74,754 +90,1155 @@ header h1 span {
     display: flex;
     align-items: center;
     gap: 16px;
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-dim);
 }
 
 .status-dot {
     display: inline-block;
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
-    margin-right: 6px;
+    margin-right: 5px;
 }
 
-.status-dot.connected    { background: var(--green); }
+.status-dot.connected    { background: var(--green); box-shadow: 0 0 6px var(--green); }
 .status-dot.disconnected { background: var(--red); }
 .status-dot.connecting   { background: var(--yellow); animation: pulse 1s ease-in-out infinite; }
 
 @keyframes pulse {
     0%, 100% { opacity: 1; }
-    50%      { opacity: 0.4; }
-}
-
-.main-area {
-    overflow-y: auto;
-    padding: 16px 20px;
-}
-
-.sidebar {
-    border-left: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
+    50%      { opacity: 0.3; }
 }
 
 /* ------------------------------------------------------------------ */
-/* Agent Cards Grid                                                    */
+/* Legend overlay (bottom-left)                                        */
 /* ------------------------------------------------------------------ */
-.section-title {
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-dim);
-    margin-bottom: 12px;
-}
-
-.agents-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-    gap: 10px;
-    margin-bottom: 28px;
-}
-
-.agent-card {
-    background: var(--bg-card);
+.legend {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    z-index: 10;
+    background: rgba(22,27,34,0.88);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 12px 14px;
-    transition: border-color 0.15s, background 0.15s;
-    position: relative;
-    overflow: hidden;
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 11px;
+    color: var(--text-dim);
+    backdrop-filter: blur(8px);
+    max-width: 220px;
 }
 
-.agent-card:hover {
-    background: var(--bg-hover);
+.legend h3 {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-mute);
+    margin-bottom: 8px;
 }
 
-.agent-card.active {
-    border-color: var(--green);
-}
-
-.agent-card.active::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 3px;
-    height: 100%;
-    background: var(--green);
-}
-
-.agent-card.done {
-    border-color: var(--accent);
-}
-
-.agent-card.done::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 3px;
-    height: 100%;
-    background: var(--accent);
-}
-
-.agent-header {
+.legend-item {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    margin-bottom: 6px;
+    gap: 8px;
+    margin-bottom: 5px;
+    line-height: 1.4;
 }
 
-.agent-name {
+.legend-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+.legend-swatch.circle { border-radius: 50%; }
+.legend-swatch.diamond {
+    width: 10px;
+    height: 10px;
+    transform: rotate(45deg);
+    border-radius: 1px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Detail panel (right side, shown on click)                           */
+/* ------------------------------------------------------------------ */
+.detail-panel {
+    position: absolute;
+    top: 60px;
+    right: 16px;
+    z-index: 10;
+    width: 300px;
+    background: rgba(22,27,34,0.92);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    backdrop-filter: blur(10px);
+    display: none;
     font-size: 13px;
-    font-weight: 600;
+    max-height: calc(100vh - 100px);
+    overflow-y: auto;
+}
+
+.detail-panel.visible {
+    display: block;
+}
+
+.detail-panel .close-btn {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    background: none;
+    border: none;
+    color: var(--text-mute);
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 4px;
+}
+
+.detail-panel .close-btn:hover {
     color: var(--text);
 }
 
-.agent-badge {
-    font-size: 10px;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    padding: 2px 6px;
-    border-radius: 3px;
-    background: var(--bg);
+.detail-panel h2 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    padding-right: 24px;
 }
 
-.agent-badge.idle   { color: var(--text-mute); }
-.agent-badge.active { color: var(--green); background: #3fb95018; }
-.agent-badge.done   { color: var(--accent); background: #58a6ff18; }
+.detail-panel .detail-type {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-mute);
+    margin-bottom: 12px;
+}
 
-.agent-action {
+.detail-panel .detail-desc {
+    color: var(--text-dim);
+    font-size: 12px;
+    line-height: 1.6;
+    margin-bottom: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.detail-panel .detail-section {
+    margin-top: 12px;
+}
+
+.detail-panel .detail-section h4 {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-mute);
+    margin-bottom: 6px;
+}
+
+.detail-panel .connection-list {
+    list-style: none;
     font-size: 12px;
     color: var(--text-dim);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    margin-bottom: 4px;
 }
 
-.agent-files {
-    font-size: 11px;
-    font-family: var(--mono);
-    color: var(--text-mute);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-/* ------------------------------------------------------------------ */
-/* Messages Panel (inter-agent communication)                          */
-/* ------------------------------------------------------------------ */
-.messages-section {
-    margin-bottom: 28px;
-}
-
-.messages-list {
+.detail-panel .connection-list li {
+    padding: 3px 0;
+    border-bottom: 1px solid rgba(48,54,61,0.5);
     display: flex;
-    flex-direction: column;
+    align-items: center;
     gap: 6px;
 }
 
-.message-item {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 10px 14px;
-    font-size: 13px;
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
+.detail-panel .connection-list li:last-child {
+    border-bottom: none;
 }
 
-.message-arrow {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    flex-shrink: 0;
-    font-size: 12px;
-    font-weight: 600;
-    white-space: nowrap;
-}
-
-.message-arrow .arrow {
-    color: var(--text-mute);
-    font-size: 14px;
-}
-
-.message-body {
-    color: var(--text-dim);
-    font-size: 12px;
-    line-height: 1.5;
-    min-width: 0;
-    word-break: break-word;
-}
-
-.message-time {
-    font-size: 11px;
-    color: var(--text-mute);
-    margin-left: auto;
-    flex-shrink: 0;
-    font-family: var(--mono);
-}
-
-/* ------------------------------------------------------------------ */
-/* Sidebar: Activity Timeline                                          */
-/* ------------------------------------------------------------------ */
-.sidebar-header {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-card);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.sidebar-header h2 {
-    font-size: 13px;
-    font-weight: 600;
-}
-
-.event-count {
-    font-size: 11px;
-    color: var(--text-mute);
-    font-family: var(--mono);
-}
-
-.timeline {
-    flex: 1;
-    overflow-y: auto;
-    padding: 8px 0;
-}
-
-.timeline-event {
-    display: flex;
-    align-items: flex-start;
-    padding: 6px 16px;
-    gap: 10px;
-    font-size: 12px;
-    transition: background 0.1s;
-}
-
-.timeline-event:hover {
-    background: var(--bg-hover);
-}
-
-.timeline-event.new-event {
-    animation: flash 0.6s ease-out;
-}
-
-@keyframes flash {
-    0%   { background: #58a6ff20; }
-    100% { background: transparent; }
-}
-
-.event-time {
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--text-mute);
-    flex-shrink: 0;
-    width: 52px;
-    text-align: right;
-    padding-top: 1px;
-}
-
-.event-dot {
-    width: 8px;
-    height: 8px;
+.conn-dot {
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     flex-shrink: 0;
-    margin-top: 5px;
-}
-
-.event-content {
-    min-width: 0;
-    flex: 1;
-}
-
-.event-agent {
-    font-weight: 600;
-    font-size: 12px;
-}
-
-.event-type {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--text-mute);
-    margin-left: 6px;
-}
-
-.event-detail {
-    color: var(--text-dim);
-    font-size: 12px;
-    word-break: break-word;
 }
 
 /* ------------------------------------------------------------------ */
-/* Empty state                                                         */
+/* Stats bar (bottom-right)                                            */
 /* ------------------------------------------------------------------ */
-.empty-state {
+.stats-bar {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    z-index: 10;
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 60px 20px;
-    text-align: center;
-}
-
-.empty-state h3 {
-    font-size: 16px;
-    font-weight: 600;
-    margin-bottom: 8px;
-    color: var(--text-dim);
-}
-
-.empty-state p {
-    font-size: 13px;
+    gap: 12px;
+    font-size: 11px;
     color: var(--text-mute);
-    max-width: 340px;
-    line-height: 1.6;
+    font-family: var(--mono);
+    background: rgba(22,27,34,0.88);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 14px;
+    backdrop-filter: blur(8px);
 }
 
-.empty-state code {
-    font-family: var(--mono);
-    font-size: 12px;
-    background: var(--bg-card);
-    padding: 2px 6px;
-    border-radius: 3px;
-    border: 1px solid var(--border);
+.stats-bar .stat-label {
+    color: var(--text-dim);
+    margin-right: 4px;
 }
 
 /* ------------------------------------------------------------------ */
 /* Scrollbar                                                           */
 /* ------------------------------------------------------------------ */
-::-webkit-scrollbar       { width: 6px; }
+::-webkit-scrollbar       { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-mute); }
-
-/* ------------------------------------------------------------------ */
-/* Responsive                                                          */
-/* ------------------------------------------------------------------ */
-@media (max-width: 900px) {
-    .app {
-        grid-template-columns: 1fr;
-        grid-template-rows: auto 1fr 300px;
-    }
-    .sidebar {
-        border-left: none;
-        border-top: 1px solid var(--border);
-    }
-}
 </style>
 </head>
 <body>
 
-<div class="app">
-    <header>
-        <h1>brains-in-a-hat <span>| agent dashboard</span></h1>
-        <div class="status-bar">
-            <span id="agent-count">0 agents</span>
-            <span id="event-count">0 events</span>
-            <span id="connection-status">
-                <span class="status-dot connecting" id="status-dot"></span>
-                <span id="status-text">connecting</span>
-            </span>
-        </div>
-    </header>
-
-    <div class="main-area" id="main-area">
-        <div class="section-title">Agents</div>
-        <div class="agents-grid" id="agents-grid"></div>
-
-        <div class="messages-section" id="messages-section" style="display:none">
-            <div class="section-title">Inter-Agent Messages</div>
-            <div class="messages-list" id="messages-list"></div>
-        </div>
-
-        <div class="empty-state" id="empty-state">
-            <h3>Waiting for agent activity</h3>
-            <p>
-                Events will appear here when agents start reporting.
-                Agents write to <code>.claude/team/activity.jsonl</code>
-            </p>
-        </div>
+<header>
+    <h1>brains-in-a-hat <span>| agent dashboard</span></h1>
+    <div class="status-bar">
+        <span id="agent-count">0 agents</span>
+        <span id="node-count">0 nodes</span>
+        <span id="edge-count">0 edges</span>
+        <span id="connection-status">
+            <span class="status-dot connecting" id="status-dot"></span>
+            <span id="status-text">connecting</span>
+        </span>
     </div>
+</header>
 
-    <div class="sidebar">
-        <div class="sidebar-header">
-            <h2>Activity Timeline</h2>
-            <span class="event-count" id="timeline-count">0</span>
-        </div>
-        <div class="timeline" id="timeline"></div>
+<div class="legend">
+    <h3>Node Types</h3>
+    <div class="legend-item">
+        <span class="legend-swatch circle" style="background:#58a6ff; box-shadow:0 0 6px #58a6ff;"></span>
+        Agent (active)
+    </div>
+    <div class="legend-item">
+        <span class="legend-swatch circle" style="background:#484f58;"></span>
+        Agent (idle)
+    </div>
+    <div class="legend-item">
+        <span class="legend-swatch" style="background:#3fb950;"></span>
+        File (.py)
+    </div>
+    <div class="legend-item">
+        <span class="legend-swatch" style="background:#bc8cff;"></span>
+        File (.qml)
+    </div>
+    <div class="legend-item">
+        <span class="legend-swatch" style="background:#f0883e;"></span>
+        File (.md)
+    </div>
+    <div class="legend-item">
+        <span class="legend-swatch" style="background:#39d2c0;"></span>
+        File (.json)
+    </div>
+    <div class="legend-item">
+        <span class="legend-swatch diamond" style="background:#e3b341;"></span>
+        Vault (decision)
+    </div>
+    <div class="legend-item">
+        <span class="legend-swatch diamond" style="background:#56d4dd;"></span>
+        Vault (retro)
+    </div>
+    <div class="legend-item">
+        <span class="legend-swatch diamond" style="background:#db61a2;"></span>
+        Vault (research)
+    </div>
+    <h3 style="margin-top:10px;">Edge Types</h3>
+    <div class="legend-item">
+        <span class="legend-swatch" style="background:linear-gradient(90deg,#58a6ff,#bc8cff); width:20px; height:3px; border-radius:2px;"></span>
+        Agent &rarr; Agent
+    </div>
+    <div class="legend-item">
+        <span class="legend-swatch" style="background:#3fb950; width:20px; height:2px; border-radius:1px;"></span>
+        Agent &rarr; File
+    </div>
+    <div class="legend-item">
+        <span class="legend-swatch" style="background:#e3b341; width:20px; height:2px; border-radius:1px;"></span>
+        Agent &rarr; Vault
+    </div>
+    <div class="legend-item">
+        <span class="legend-swatch" style="background:#d29922; width:20px; height:2px; border-radius:1px; opacity:0.6;"></span>
+        Spawn trail
     </div>
 </div>
 
+<div class="detail-panel" id="detail-panel">
+    <button class="close-btn" id="detail-close">&times;</button>
+    <h2 id="detail-name"></h2>
+    <div class="detail-type" id="detail-type"></div>
+    <div class="detail-desc" id="detail-desc"></div>
+    <div class="detail-section" id="detail-connections-section">
+        <h4>Connections</h4>
+        <ul class="connection-list" id="detail-connections"></ul>
+    </div>
+</div>
+
+<div class="stats-bar">
+    <span><span class="stat-label">Nodes</span><span id="stat-nodes">0</span></span>
+    <span><span class="stat-label">Edges</span><span id="stat-edges">0</span></span>
+    <span><span class="stat-label">Events</span><span id="stat-events">0</span></span>
+</div>
+
+<div id="graph-container"></div>
+
+<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+<script src="https://unpkg.com/3d-force-graph@1.73.4"></script>
 <script>
 /* ================================================================== */
-/* Dashboard Client                                                    */
+/* brains-in-a-hat 3D Graph Dashboard                                  */
 /* ================================================================== */
 (function() {
     "use strict";
 
-    // ---- State ----
-    var agents = {};          // id -> {id, name, description, status, action, files, color}
-    var allEvents = [];       // all activity events in order
-    var messages = [];        // inter-agent message events
-    var sseRetryMs = 1000;
-    var sseMaxRetryMs = 30000;
-    var eventSource = null;
-    var autoScroll = true;
+    // ----------------------------------------------------------------
+    // Constants
+    // ----------------------------------------------------------------
+    var CLUSTER_X_AGENT = 0;
+    var CLUSTER_X_FILE  = -200;
+    var CLUSTER_X_VAULT = 200;
 
-    // ---- Agent color palette ----
-    // 23 distinct, accessible-on-dark colors
-    var COLORS = [
-        "#58a6ff", "#3fb950", "#d29922", "#f85149", "#bc8cff",
-        "#f0883e", "#39d2c0", "#db61a2", "#79c0ff", "#7ee787",
-        "#e3b341", "#ff7b72", "#d2a8ff", "#ffa657", "#56d4dd",
-        "#ff9bce", "#a5d6ff", "#aff5b4", "#f8e3a1", "#ffc1c0",
-        "#cabeff", "#ffd8b5", "#b1ecee"
-    ];
-    var colorIndex = 0;
-    var agentColors = {};
+    var AGENT_ACTIVE_COLOR = "#58a6ff";
+    var AGENT_IDLE_COLOR   = "#484f58";
+    var AGENT_DONE_COLOR   = "#3fb950";
 
-    function getAgentColor(agentId) {
-        if (!agentColors[agentId]) {
-            agentColors[agentId] = COLORS[colorIndex % COLORS.length];
-            colorIndex++;
-        }
-        return agentColors[agentId];
-    }
+    var FILE_COLORS = {
+        ".py":   "#3fb950",
+        ".qml":  "#bc8cff",
+        ".md":   "#f0883e",
+        ".json": "#39d2c0",
+        ".ts":   "#3178c6",
+        ".js":   "#f0db4f",
+        ".yaml": "#cb171e",
+        ".yml":  "#cb171e",
+        ".toml": "#9c4121",
+        ".html": "#e34c26",
+        ".css":  "#563d7c"
+    };
+    var FILE_DEFAULT_COLOR = "#e6edf3";
 
-    // ---- DOM refs ----
-    var $agentsGrid     = document.getElementById("agents-grid");
-    var $messagesList   = document.getElementById("messages-list");
-    var $messagesSection = document.getElementById("messages-section");
-    var $timeline       = document.getElementById("timeline");
-    var $emptyState     = document.getElementById("empty-state");
-    var $agentCount     = document.getElementById("agent-count");
-    var $eventCount     = document.getElementById("event-count");
-    var $timelineCount  = document.getElementById("timeline-count");
-    var $statusDot      = document.getElementById("status-dot");
-    var $statusText     = document.getElementById("status-text");
+    var VAULT_COLORS = {
+        "decision": "#e3b341",
+        "retro":    "#56d4dd",
+        "research": "#db61a2"
+    };
+    var VAULT_DEFAULT_COLOR = "#bc8cff";
 
-    // ---- Utility ----
+    var EDGE_COLORS = {
+        "agent-agent": "#7c6ddb",
+        "agent-file":  "#3fb950",
+        "agent-vault": "#e3b341",
+        "spawn":       "#d29922"
+    };
+
+    // ----------------------------------------------------------------
+    // State
+    // ----------------------------------------------------------------
+    var state = {
+        agents: {},           // id -> {id, name, description, status, action, files}
+        agentList: [],        // raw agent list from API
+        files: {},            // path -> {path, type, ext}
+        vault: {},            // path -> {path, type, title}
+        events: [],           // all activity events
+        nodes: [],            // graph node objects
+        links: [],            // graph link objects
+        nodeMap: {},          // id -> node object
+        linkSet: new Set(),   // "source|target|type" dedup keys
+        highlightNodes: new Set(),
+        highlightLinks: new Set(),
+        hoveredNode: null,
+        selectedNode: null,
+        totalEvents: 0,
+        sseRetryMs: 1000,
+        sseMaxRetryMs: 30000,
+        eventSource: null
+    };
+
+    // ----------------------------------------------------------------
+    // DOM references
+    // ----------------------------------------------------------------
+    var $agentCount    = document.getElementById("agent-count");
+    var $nodeCount     = document.getElementById("node-count");
+    var $edgeCount     = document.getElementById("edge-count");
+    var $statusDot     = document.getElementById("status-dot");
+    var $statusText    = document.getElementById("status-text");
+    var $detailPanel   = document.getElementById("detail-panel");
+    var $detailClose   = document.getElementById("detail-close");
+    var $detailName    = document.getElementById("detail-name");
+    var $detailType    = document.getElementById("detail-type");
+    var $detailDesc    = document.getElementById("detail-desc");
+    var $detailConns   = document.getElementById("detail-connections");
+    var $detailConnsSection = document.getElementById("detail-connections-section");
+    var $statNodes     = document.getElementById("stat-nodes");
+    var $statEdges     = document.getElementById("stat-edges");
+    var $statEvents    = document.getElementById("stat-events");
+
+    // ----------------------------------------------------------------
+    // Utility
+    // ----------------------------------------------------------------
     function esc(str) {
         var div = document.createElement("div");
-        div.textContent = str;
+        div.textContent = str || "";
         return div.innerHTML;
     }
 
-    function formatTime(ts) {
-        // ts is ISO string, show HH:MM:SS
-        if (!ts) return "";
-        try {
-            var d = new Date(ts);
-            if (isNaN(d.getTime())) return ts;
-            return d.toLocaleTimeString("en-GB", {hour:"2-digit", minute:"2-digit", second:"2-digit"});
-        } catch(e) {
-            return ts;
-        }
+    function fileExt(path) {
+        var dot = path.lastIndexOf(".");
+        if (dot < 0) return "";
+        return path.substring(dot).toLowerCase();
     }
 
-    function shortTime(ts) {
-        if (!ts) return "";
-        try {
-            var d = new Date(ts);
-            if (isNaN(d.getTime())) return "";
-            return d.toLocaleTimeString("en-GB", {hour:"2-digit", minute:"2-digit"});
-        } catch(e) {
-            return "";
-        }
+    function fileName(path) {
+        var slash = path.lastIndexOf("/");
+        return slash >= 0 ? path.substring(slash + 1) : path;
     }
 
-    // ---- Agent card rendering ----
-    function ensureAgent(agentId) {
-        if (agents[agentId]) return;
-        agents[agentId] = {
-            id: agentId,
-            name: agentId,
-            description: "",
+    function fileColor(path) {
+        var ext = fileExt(path);
+        return FILE_COLORS[ext] || FILE_DEFAULT_COLOR;
+    }
+
+    function vaultColor(type) {
+        return VAULT_COLORS[type] || VAULT_DEFAULT_COLOR;
+    }
+
+    function hexToRgb(hex) {
+        hex = hex.replace("#", "");
+        if (hex.length === 3) {
+            hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+        }
+        var r = parseInt(hex.substring(0,2), 16);
+        var g = parseInt(hex.substring(2,4), 16);
+        var b = parseInt(hex.substring(4,6), 16);
+        return {r: r, g: g, b: b};
+    }
+
+    // ----------------------------------------------------------------
+    // Node management
+    // ----------------------------------------------------------------
+    function ensureAgentNode(agentId, agentMeta) {
+        var nodeId = "agent:" + agentId;
+        if (state.nodeMap[nodeId]) return state.nodeMap[nodeId];
+
+        var meta = agentMeta || {};
+        var node = {
+            id: nodeId,
+            label: meta.name || agentId,
+            group: "agent",
+            agentId: agentId,
+            description: meta.description || "",
             status: "idle",
             action: "",
-            files: [],
-            color: getAgentColor(agentId)
+            color: AGENT_IDLE_COLOR,
+            size: 6,
+            fx: CLUSTER_X_AGENT + (Math.random() - 0.5) * 60,
+            fy: undefined,
+            fz: undefined
         };
+
+        state.nodes.push(node);
+        state.nodeMap[nodeId] = node;
+        return node;
     }
 
-    function renderAgentCards() {
-        var ids = Object.keys(agents).sort(function(a, b) {
-            // Active first, then done, then idle
-            var order = {active: 0, done: 1, idle: 2};
-            var diff = (order[agents[a].status] || 2) - (order[agents[b].status] || 2);
-            if (diff !== 0) return diff;
-            return a.localeCompare(b);
-        });
+    function ensureFileNode(filePath) {
+        var nodeId = "file:" + filePath;
+        if (state.nodeMap[nodeId]) return state.nodeMap[nodeId];
 
-        var html = "";
-        for (var i = 0; i < ids.length; i++) {
-            var a = agents[ids[i]];
-            html += '<div class="agent-card ' + esc(a.status) + '" data-agent="' + esc(a.id) + '">';
-            html += '  <div class="agent-header">';
-            html += '    <span class="agent-name" style="color:' + a.color + '">' + esc(a.name) + '</span>';
-            html += '    <span class="agent-badge ' + esc(a.status) + '">' + esc(a.status) + '</span>';
-            html += '  </div>';
-            if (a.action) {
-                html += '  <div class="agent-action">' + esc(a.action) + '</div>';
+        var ext = fileExt(filePath);
+        var node = {
+            id: nodeId,
+            label: fileName(filePath),
+            fullPath: filePath,
+            group: "file",
+            ext: ext,
+            color: fileColor(filePath),
+            size: 3,
+            fx: CLUSTER_X_FILE + (Math.random() - 0.5) * 80,
+            fy: undefined,
+            fz: undefined
+        };
+
+        state.nodes.push(node);
+        state.nodeMap[nodeId] = node;
+        state.files[filePath] = { path: filePath, ext: ext };
+        return node;
+    }
+
+    function ensureVaultNode(vaultPath, vaultType, vaultTitle) {
+        var nodeId = "vault:" + vaultPath;
+        if (state.nodeMap[nodeId]) return state.nodeMap[nodeId];
+
+        var type = vaultType || "note";
+        var node = {
+            id: nodeId,
+            label: vaultTitle || fileName(vaultPath),
+            fullPath: vaultPath,
+            group: "vault",
+            vaultType: type,
+            color: vaultColor(type),
+            size: 4,
+            fx: CLUSTER_X_VAULT + (Math.random() - 0.5) * 80,
+            fy: undefined,
+            fz: undefined
+        };
+
+        state.nodes.push(node);
+        state.nodeMap[nodeId] = node;
+        state.vault[vaultPath] = { path: vaultPath, type: type, title: vaultTitle || fileName(vaultPath) };
+        return node;
+    }
+
+    // ----------------------------------------------------------------
+    // Link management
+    // ----------------------------------------------------------------
+    function addLink(sourceId, targetId, edgeType, label) {
+        var key = sourceId + "|" + targetId + "|" + edgeType;
+        if (state.linkSet.has(key)) {
+            // Refresh the existing link's animation timestamp
+            for (var i = 0; i < state.links.length; i++) {
+                if (state.links[i]._key === key) {
+                    state.links[i]._lastActive = Date.now();
+                    state.links[i].label = label || state.links[i].label;
+                    break;
+                }
             }
-            if (a.files.length > 0) {
-                html += '  <div class="agent-files">' + esc(a.files.slice(-3).join(", ")) + '</div>';
-            }
-            html += '</div>';
+            return false;
         }
-        $agentsGrid.innerHTML = html;
-        $agentCount.textContent = ids.length + " agent" + (ids.length !== 1 ? "s" : "");
+        state.linkSet.add(key);
+
+        var color = EDGE_COLORS[edgeType] || "#30363d";
+        var link = {
+            source: sourceId,
+            target: targetId,
+            _key: key,
+            edgeType: edgeType,
+            label: label || "",
+            color: color,
+            _lastActive: Date.now(),
+            _particles: edgeType === "agent-agent" ? 3 : (edgeType === "spawn" ? 2 : 1),
+            _particleSpeed: edgeType === "agent-agent" ? 0.008 : 0.005
+        };
+
+        state.links.push(link);
+        return true;
     }
 
-    // ---- Timeline rendering ----
-    function addTimelineEvent(ev, animate) {
-        var el = document.createElement("div");
-        el.className = "timeline-event" + (animate ? " new-event" : "");
+    // ----------------------------------------------------------------
+    // Process events into graph data
+    // ----------------------------------------------------------------
+    function processEvent(ev) {
+        state.totalEvents++;
 
         var agentId = ev.agent || "unknown";
-        var color = getAgentColor(agentId);
+        var agentNodeId = "agent:" + agentId;
 
-        el.innerHTML =
-            '<span class="event-time">' + esc(shortTime(ev.ts)) + '</span>' +
-            '<span class="event-dot" style="background:' + color + '"></span>' +
-            '<div class="event-content">' +
-                '<span class="event-agent" style="color:' + color + '">' + esc(agentId) + '</span>' +
-                '<span class="event-type">' + esc(ev.event || "") + '</span>' +
-                (ev.detail ? '<div class="event-detail">' + esc(ev.detail) + '</div>' : '') +
-            '</div>';
-
-        $timeline.appendChild(el);
-
-        // Auto-scroll if user is near the bottom
-        if (autoScroll) {
-            $timeline.scrollTop = $timeline.scrollHeight;
-        }
-    }
-
-    function renderTimeline() {
-        $timeline.innerHTML = "";
-        for (var i = 0; i < allEvents.length; i++) {
-            addTimelineEvent(allEvents[i], false);
-        }
-        if (autoScroll) {
-            $timeline.scrollTop = $timeline.scrollHeight;
-        }
-    }
-
-    // Track scroll position for auto-scroll
-    $timeline.addEventListener("scroll", function() {
-        var el = $timeline;
-        autoScroll = (el.scrollHeight - el.scrollTop - el.clientHeight) < 40;
-    });
-
-    // ---- Message rendering ----
-    function parseMessage(detail) {
-        // Format: "target: message body" or just plain text
-        if (!detail) return null;
-        var colonIdx = detail.indexOf(":");
-        if (colonIdx > 0 && colonIdx < 30) {
-            return {
-                target: detail.substring(0, colonIdx).trim(),
-                body: detail.substring(colonIdx + 1).trim()
-            };
-        }
-        return { target: "", body: detail };
-    }
-
-    function renderMessages() {
-        if (messages.length === 0) {
-            $messagesSection.style.display = "none";
-            return;
-        }
-        $messagesSection.style.display = "";
-
-        // Show last 20 messages
-        var recent = messages.slice(-20);
-        var html = "";
-        for (var i = 0; i < recent.length; i++) {
-            var ev = recent[i];
-            var parsed = parseMessage(ev.detail);
-            if (!parsed) continue;
-
-            var senderColor = getAgentColor(ev.agent);
-            var targetColor = parsed.target ? getAgentColor(parsed.target) : "var(--text-mute)";
-
-            html += '<div class="message-item">';
-            html += '  <div class="message-arrow">';
-            html += '    <span style="color:' + senderColor + '">' + esc(ev.agent) + '</span>';
-            if (parsed.target) {
-                html += '    <span class="arrow">&rarr;</span>';
-                html += '    <span style="color:' + targetColor + '">' + esc(parsed.target) + '</span>';
-            }
-            html += '  </div>';
-            html += '  <div class="message-body">' + esc(parsed.body) + '</div>';
-            html += '  <span class="message-time">' + esc(shortTime(ev.ts)) + '</span>';
-            html += '</div>';
-        }
-        $messagesList.innerHTML = html;
-    }
-
-    // ---- Update counts ----
-    function updateCounts() {
-        $eventCount.textContent = allEvents.length + " event" + (allEvents.length !== 1 ? "s" : "");
-        $timelineCount.textContent = allEvents.length;
-        $emptyState.style.display = allEvents.length > 0 ? "none" : "";
-    }
-
-    // ---- Process a single event ----
-    function processEvent(ev, animate) {
-        allEvents.push(ev);
-
-        var agentId = ev.agent || "unknown";
-        ensureAgent(agentId);
-        var agent = agents[agentId];
+        // Ensure agent node exists
+        ensureAgentNode(agentId);
+        var agentNode = state.nodeMap[agentNodeId];
 
         switch (ev.event) {
             case "start":
-                agent.status = "active";
-                agent.action = ev.detail || "started";
-                agent.files = [];
-                break;
-            case "done":
-                agent.status = "done";
-                agent.action = ev.detail || "finished";
-                break;
-            case "read":
-            case "write":
-            case "edit":
-                agent.status = "active";
-                agent.action = ev.event + ": " + (ev.detail || "");
+                agentNode.status = "active";
+                agentNode.color = AGENT_ACTIVE_COLOR;
+                agentNode.size = 8;
+                agentNode.action = ev.detail || "started";
+
+                // Look for orchestrator in detail (e.g. "spawned by tech-lead")
                 if (ev.detail) {
-                    // Deduplicate files
-                    var file = ev.detail.split(":")[0].trim();
-                    if (agent.files.indexOf(file) === -1) {
-                        agent.files.push(file);
+                    var spawnMatch = ev.detail.match(/(?:spawned|started)\s+by\s+(\S+)/i);
+                    if (spawnMatch) {
+                        var spawnerId = spawnMatch[1].replace(/[^a-zA-Z0-9_-]/g, "");
+                        var spawnerNodeId = "agent:" + spawnerId;
+                        ensureAgentNode(spawnerId);
+                        addLink(spawnerNodeId, agentNodeId, "spawn", "spawn");
                     }
                 }
                 break;
-            case "message":
-                agent.status = "active";
-                agent.action = "messaging: " + (ev.detail || "");
-                messages.push(ev);
+
+            case "done":
+                agentNode.status = "done";
+                agentNode.color = AGENT_DONE_COLOR;
+                agentNode.size = 6;
+                agentNode.action = ev.detail || "finished";
                 break;
-            default:
-                if (agent.status !== "done") {
-                    agent.status = "active";
+
+            case "read":
+            case "write":
+            case "edit":
+                agentNode.status = "active";
+                agentNode.color = AGENT_ACTIVE_COLOR;
+                agentNode.size = 8;
+                agentNode.action = ev.event + ": " + (ev.detail || "");
+
+                if (ev.detail) {
+                    var filePath = ev.detail.split(":")[0].trim().split(" ")[0].trim();
+                    if (filePath && filePath.length > 0 && (filePath.indexOf("/") >= 0 || filePath.indexOf(".") >= 0)) {
+                        // Check if this looks like a vault path
+                        if (filePath.indexOf("vault/") >= 0 || filePath.indexOf("vault-templates/") >= 0) {
+                            var vType = "note";
+                            if (filePath.indexOf("decision") >= 0) vType = "decision";
+                            else if (filePath.indexOf("retro") >= 0) vType = "retro";
+                            else if (filePath.indexOf("research") >= 0) vType = "research";
+                            ensureVaultNode(filePath, vType, fileName(filePath));
+                            addLink(agentNodeId, "vault:" + filePath, "agent-vault", ev.event);
+                        } else {
+                            ensureFileNode(filePath);
+                            addLink(agentNodeId, "file:" + filePath, "agent-file", ev.event);
+                        }
+                    }
                 }
-                agent.action = (ev.event || "") + ": " + (ev.detail || "");
+                break;
+
+            case "message":
+            case "SendMessage":
+                agentNode.status = "active";
+                agentNode.color = AGENT_ACTIVE_COLOR;
+                agentNode.size = 8;
+                agentNode.action = "messaging";
+
+                if (ev.detail) {
+                    // Parse "target: message body"
+                    var colonIdx = ev.detail.indexOf(":");
+                    if (colonIdx > 0 && colonIdx < 40) {
+                        var target = ev.detail.substring(0, colonIdx).trim();
+                        // If target looks like an agent ID (no spaces, reasonable length)
+                        if (target.length > 0 && target.length < 30 && target.indexOf(" ") < 0) {
+                            var targetNodeId = "agent:" + target;
+                            ensureAgentNode(target);
+                            addLink(agentNodeId, targetNodeId, "agent-agent", "message");
+                        }
+                    }
+                }
+                break;
+
+            case "vault_write":
+                agentNode.status = "active";
+                agentNode.color = AGENT_ACTIVE_COLOR;
+                agentNode.action = "vault write";
+                if (ev.detail) {
+                    var vaultPath = ev.detail.split(":")[0].trim().split(" ")[0].trim();
+                    if (vaultPath) {
+                        var vt = "note";
+                        if (vaultPath.indexOf("decision") >= 0) vt = "decision";
+                        else if (vaultPath.indexOf("retro") >= 0) vt = "retro";
+                        else if (vaultPath.indexOf("research") >= 0) vt = "research";
+                        ensureVaultNode(vaultPath, vt, fileName(vaultPath));
+                        addLink(agentNodeId, "vault:" + vaultPath, "agent-vault", "write");
+                    }
+                }
+                break;
+
+            default:
+                if (agentNode.status !== "done") {
+                    agentNode.status = "active";
+                    agentNode.color = AGENT_ACTIVE_COLOR;
+                }
+                agentNode.action = (ev.event || "") + ": " + (ev.detail || "");
                 break;
         }
+    }
 
-        if (animate) {
-            addTimelineEvent(ev, true);
+    // ----------------------------------------------------------------
+    // Graph initialization
+    // ----------------------------------------------------------------
+    var graph = null;
+
+    // THREE.js is exposed as a global by 3d-force-graph's bundled three.js
+    function getTHREE() {
+        return window.THREE;
+    }
+
+    function makeNodeObject(node) {
+        var T = getTHREE();
+        if (!T) return undefined; // THREE not loaded yet
+
+        var group = new T.Group();
+
+        var isHighlighted = state.highlightNodes.size === 0 || state.highlightNodes.has(node);
+        var opacity = isHighlighted ? 1.0 : 0.15;
+
+        if (node.group === "agent") {
+            // Sphere for agents
+            var geom = new T.SphereGeometry(node.size, 16, 12);
+            var mat = new T.MeshPhongMaterial({
+                color: node.color,
+                transparent: true,
+                opacity: opacity,
+                emissive: node.status === "active" ? node.color : "#000000",
+                emissiveIntensity: node.status === "active" ? 0.4 : 0
+            });
+            var mesh = new T.Mesh(geom, mat);
+            group.add(mesh);
+
+            // Glow ring for active agents
+            if (node.status === "active") {
+                var ringGeom = new T.RingGeometry(node.size + 2, node.size + 3.5, 24);
+                var ringMat = new T.MeshBasicMaterial({
+                    color: node.color,
+                    transparent: true,
+                    opacity: opacity * 0.35,
+                    side: T.DoubleSide
+                });
+                var ring = new T.Mesh(ringGeom, ringMat);
+                group.add(ring);
+            }
+
+        } else if (node.group === "file") {
+            // Cube for files
+            var fsize = node.size * 1.5;
+            var geom2 = new T.BoxGeometry(fsize, fsize, fsize);
+            var mat2 = new T.MeshPhongMaterial({
+                color: node.color,
+                transparent: true,
+                opacity: opacity,
+                emissive: node.color,
+                emissiveIntensity: 0.15
+            });
+            var mesh2 = new T.Mesh(geom2, mat2);
+            group.add(mesh2);
+
+        } else if (node.group === "vault") {
+            // Diamond (octahedron) for vault
+            var dsize = node.size * 1.8;
+            var geom3 = new T.OctahedronGeometry(dsize, 0);
+            var mat3 = new T.MeshPhongMaterial({
+                color: node.color,
+                transparent: true,
+                opacity: opacity,
+                emissive: node.color,
+                emissiveIntensity: 0.2
+            });
+            var mesh3 = new T.Mesh(geom3, mat3);
+            group.add(mesh3);
         }
 
-        updateCounts();
+        // Label sprite
+        var canvas = document.createElement("canvas");
+        var ctx = canvas.getContext("2d");
+        var fontSize = node.group === "agent" ? 28 : 22;
+        canvas.width = 512;
+        canvas.height = 64;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.font = (node.group === "agent" ? "bold " : "") + fontSize + "px -apple-system, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = isHighlighted ? "rgba(230,237,243," + opacity + ")" : "rgba(230,237,243,0.15)";
+        ctx.fillText(node.label, canvas.width / 2, canvas.height / 2);
+
+        var texture = new T.CanvasTexture(canvas);
+        texture.needsUpdate = true;
+        var spriteMat = new T.SpriteMaterial({
+            map: texture,
+            transparent: true,
+            depthTest: false
+        });
+        var sprite = new T.Sprite(spriteMat);
+        var labelScale = node.group === "agent" ? 40 : 30;
+        sprite.scale.set(labelScale, labelScale * (canvas.height / canvas.width), 1);
+        sprite.position.set(0, -(node.size + 6), 0);
+        group.add(sprite);
+
+        return group;
     }
 
-    // ---- Connection status ----
-    function setConnectionStatus(state) {
-        $statusDot.className = "status-dot " + state;
-        $statusText.textContent = state;
+    function initGraph() {
+        var container = document.getElementById("graph-container");
+
+        graph = ForceGraph3D()(container)
+            .backgroundColor("#0d1117")
+            .showNavInfo(false)
+
+            // ---- Node rendering ----
+            .nodeThreeObject(makeNodeObject)
+
+            // ---- Link rendering ----
+            .linkColor(function(link) {
+                var isHighlighted = state.highlightLinks.size === 0 || state.highlightLinks.has(link);
+                if (!isHighlighted) {
+                    var rgb = hexToRgb(link.color);
+                    return "rgba(" + rgb.r + "," + rgb.g + "," + rgb.b + ",0.06)";
+                }
+                return link.color;
+            })
+            .linkWidth(function(link) {
+                var isHighlighted = state.highlightLinks.size === 0 || state.highlightLinks.has(link);
+                if (link.edgeType === "agent-agent") return isHighlighted ? 2 : 0.5;
+                if (link.edgeType === "spawn") return isHighlighted ? 1.5 : 0.3;
+                return isHighlighted ? 1 : 0.3;
+            })
+            .linkOpacity(0.6)
+            .linkDirectionalParticles(function(link) {
+                var age = Date.now() - link._lastActive;
+                if (age < 10000) return link._particles;
+                return 0;
+            })
+            .linkDirectionalParticleSpeed(function(link) {
+                return link._particleSpeed;
+            })
+            .linkDirectionalParticleWidth(function(link) {
+                var isHighlighted = state.highlightLinks.size === 0 || state.highlightLinks.has(link);
+                return isHighlighted ? 2.5 : 0.5;
+            })
+            .linkDirectionalParticleColor(function(link) {
+                return link.color;
+            })
+            .linkCurvature(function(link) {
+                if (link.edgeType === "agent-agent") return 0.15;
+                if (link.edgeType === "agent-vault") return 0.1;
+                return 0;
+            })
+
+            // ---- Hover ----
+            .onNodeHover(function(node) {
+                document.body.style.cursor = node ? "pointer" : "default";
+                state.hoveredNode = node;
+                updateHighlights(node);
+            })
+
+            // ---- Click ----
+            .onNodeClick(function(node) {
+                if (!node) return;
+                state.selectedNode = node;
+                showDetailPanel(node);
+                focusOnNode(node);
+            })
+
+            // ---- Background click to deselect ----
+            .onBackgroundClick(function() {
+                state.selectedNode = null;
+                hideDetailPanel();
+                clearHighlights();
+            });
+
+        // ---- Forces ----
+        graph.d3Force("charge").strength(-30);
+        graph.d3Force("link").distance(function(link) {
+            if (link.edgeType === "agent-agent") return 40;
+            if (link.edgeType === "spawn") return 30;
+            return 60;
+        });
+        graph.d3Force("center", null);
+
+        // Add lights for Phong materials
+        var T = getTHREE();
+        if (T) {
+            var scene = graph.scene();
+
+            var ambientLight = new T.AmbientLight(0x404060, 1.5);
+            scene.add(ambientLight);
+
+            var pointLight1 = new T.PointLight(0x58a6ff, 1.0, 600);
+            pointLight1.position.set(0, 100, 100);
+            scene.add(pointLight1);
+
+            var pointLight2 = new T.PointLight(0xbc8cff, 0.6, 600);
+            pointLight2.position.set(-200, -50, 50);
+            scene.add(pointLight2);
+
+            var pointLight3 = new T.PointLight(0xe3b341, 0.6, 600);
+            pointLight3.position.set(200, -50, 50);
+            scene.add(pointLight3);
+        }
+
+        // Set initial data
+        graph.graphData({ nodes: state.nodes, links: state.links });
+
+        // Initial camera position
+        graph.cameraPosition({ x: 0, y: 0, z: 350 });
     }
 
-    // ---- Load initial data ----
+    // ----------------------------------------------------------------
+    // Highlight logic
+    // ----------------------------------------------------------------
+    function updateHighlights(hoverNode) {
+        state.highlightNodes.clear();
+        state.highlightLinks.clear();
+
+        if (hoverNode) {
+            state.highlightNodes.add(hoverNode);
+            // Find connected nodes and links
+            state.links.forEach(function(link) {
+                var src = typeof link.source === "object" ? link.source : state.nodeMap[link.source];
+                var tgt = typeof link.target === "object" ? link.target : state.nodeMap[link.target];
+                if (src === hoverNode || tgt === hoverNode) {
+                    state.highlightLinks.add(link);
+                    if (src) state.highlightNodes.add(src);
+                    if (tgt) state.highlightNodes.add(tgt);
+                }
+            });
+        }
+
+        refreshGraph();
+    }
+
+    function clearHighlights() {
+        state.highlightNodes.clear();
+        state.highlightLinks.clear();
+        state.hoveredNode = null;
+        refreshGraph();
+    }
+
+    // ----------------------------------------------------------------
+    // Detail panel
+    // ----------------------------------------------------------------
+    function showDetailPanel(node) {
+        $detailName.textContent = node.label;
+        $detailType.textContent = node.group.toUpperCase() + (node.group === "agent" ? " -- " + (node.status || "idle") : "");
+
+        var desc = "";
+        if (node.group === "agent") {
+            desc = node.description || "";
+            if (node.action) {
+                desc += (desc ? "\n\n" : "") + "Current: " + node.action;
+            }
+        } else if (node.group === "file") {
+            desc = "Path: " + (node.fullPath || node.label);
+            desc += "\nType: " + (node.ext || "unknown");
+        } else if (node.group === "vault") {
+            desc = "Path: " + (node.fullPath || node.label);
+            desc += "\nType: " + (node.vaultType || "note");
+        }
+        $detailDesc.textContent = desc;
+
+        // List connections
+        var connections = [];
+        state.links.forEach(function(link) {
+            var src = typeof link.source === "object" ? link.source : state.nodeMap[link.source];
+            var tgt = typeof link.target === "object" ? link.target : state.nodeMap[link.target];
+            if (src && src.id === node.id) {
+                connections.push({ direction: "->", node: tgt, type: link.edgeType });
+            } else if (tgt && tgt.id === node.id) {
+                connections.push({ direction: "<-", node: src, type: link.edgeType });
+            }
+        });
+
+        if (connections.length === 0) {
+            $detailConnsSection.style.display = "none";
+        } else {
+            $detailConnsSection.style.display = "";
+            var html = "";
+            connections.forEach(function(conn) {
+                if (!conn.node) return;
+                html += '<li>';
+                html += '<span class="conn-dot" style="background:' + esc(conn.node.color) + '"></span>';
+                html += '<span>' + esc(conn.direction) + ' ' + esc(conn.node.label) + '</span>';
+                html += '</li>';
+            });
+            $detailConns.innerHTML = html;
+        }
+
+        $detailPanel.classList.add("visible");
+    }
+
+    function hideDetailPanel() {
+        $detailPanel.classList.remove("visible");
+    }
+
+    $detailClose.addEventListener("click", function() {
+        hideDetailPanel();
+        state.selectedNode = null;
+        clearHighlights();
+    });
+
+    // ----------------------------------------------------------------
+    // Camera focus
+    // ----------------------------------------------------------------
+    function focusOnNode(node) {
+        if (!graph || !node) return;
+        var distance = 120;
+        var distRatio = 1 + distance / Math.hypot(node.x || 0, node.y || 0, node.z || 0 || 1);
+        graph.cameraPosition(
+            { x: (node.x || 0) * distRatio, y: (node.y || 0) * distRatio, z: (node.z || 0) * distRatio },
+            { x: node.x || 0, y: node.y || 0, z: node.z || 0 },
+            1200
+        );
+    }
+
+    // ----------------------------------------------------------------
+    // Graph refresh
+    // ----------------------------------------------------------------
+    var refreshScheduled = false;
+
+    function refreshGraph() {
+        if (!graph) return;
+        // Batch refreshes to avoid excessive redraws
+        if (refreshScheduled) return;
+        refreshScheduled = true;
+        requestAnimationFrame(function() {
+            refreshScheduled = false;
+            // Re-supply data to trigger node/link re-render
+            graph
+                .nodeThreeObject(makeNodeObject)
+                .graphData({ nodes: state.nodes, links: state.links });
+            updateStats();
+        });
+    }
+
+    function updateStats() {
+        $statNodes.textContent = state.nodes.length;
+        $statEdges.textContent = state.links.length;
+        $statEvents.textContent = state.totalEvents;
+        $agentCount.textContent = Object.keys(state.agents).length + " agents";
+        $nodeCount.textContent = state.nodes.length + " nodes";
+        $edgeCount.textContent = state.links.length + " edges";
+    }
+
+    // ----------------------------------------------------------------
+    // Connection status
+    // ----------------------------------------------------------------
+    function setConnectionStatus(s) {
+        $statusDot.className = "status-dot " + s;
+        $statusText.textContent = s;
+    }
+
+    // ----------------------------------------------------------------
+    // Data loading
+    // ----------------------------------------------------------------
     function loadInitialData() {
-        // Fetch agents and activity in parallel
-        var agentsFetched = false;
-        var activityFetched = false;
+        var pendingRequests = 0;
+        var requiredDone = 0;
 
+        function checkReady() {
+            if (requiredDone >= 2) {
+                finishInit();
+            }
+        }
+
+        // Fetch agents (required)
         fetch("/api/agents")
             .then(function(r) { return r.json(); })
             .then(function(data) {
+                state.agentList = data;
                 for (var i = 0; i < data.length; i++) {
                     var a = data[i];
-                    ensureAgent(a.id);
-                    agents[a.id].name = a.name;
-                    agents[a.id].description = a.description;
+                    state.agents[a.id] = a;
+                    ensureAgentNode(a.id, a);
                 }
-                agentsFetched = true;
-                if (activityFetched) finishInit();
             })
-            .catch(function(err) {
-                console.error("Failed to load agents:", err);
-                agentsFetched = true;
-                if (activityFetched) finishInit();
-            });
+            .catch(function(err) { console.warn("Failed to load agents:", err); })
+            .finally(function() { requiredDone++; checkReady(); });
 
+        // Fetch activity (required)
         fetch("/api/activity")
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 for (var i = 0; i < data.length; i++) {
-                    processEvent(data[i], false);
+                    processEvent(data[i]);
                 }
-                activityFetched = true;
-                if (agentsFetched) finishInit();
             })
-            .catch(function(err) {
-                console.error("Failed to load activity:", err);
-                activityFetched = true;
-                if (agentsFetched) finishInit();
-            });
+            .catch(function(err) { console.warn("Failed to load activity:", err); })
+            .finally(function() { requiredDone++; checkReady(); });
 
-        function finishInit() {
-            renderAgentCards();
-            renderTimeline();
-            renderMessages();
-            updateCounts();
-            connectSSE();
-        }
+        // Fetch files (optional -- server may not have this endpoint)
+        fetch("/api/files")
+            .then(function(r) {
+                if (!r.ok) throw new Error("Not available");
+                return r.json();
+            })
+            .then(function(data) {
+                for (var i = 0; i < data.length; i++) {
+                    var f = data[i];
+                    ensureFileNode(f.path);
+                }
+            })
+            .catch(function() { /* endpoint not available, files populated from events */ });
+
+        // Fetch vault (optional -- server may not have this endpoint)
+        fetch("/api/vault")
+            .then(function(r) {
+                if (!r.ok) throw new Error("Not available");
+                return r.json();
+            })
+            .then(function(data) {
+                for (var i = 0; i < data.length; i++) {
+                    var v = data[i];
+                    ensureVaultNode(v.path, v.type, v.title);
+                }
+            })
+            .catch(function() { /* endpoint not available, vault populated from events */ });
     }
 
-    // ---- SSE connection with auto-reconnect ----
+    function finishInit() {
+        initGraph();
+        updateStats();
+        connectSSE();
+    }
+
+    // ----------------------------------------------------------------
+    // SSE connection with auto-reconnect
+    // ----------------------------------------------------------------
     function connectSSE() {
-        if (eventSource) {
-            eventSource.close();
+        if (state.eventSource) {
+            state.eventSource.close();
         }
 
         setConnectionStatus("connecting");
-        eventSource = new EventSource("/events");
+        state.eventSource = new EventSource("/events");
 
-        eventSource.onopen = function() {
+        state.eventSource.onopen = function() {
             setConnectionStatus("connected");
-            sseRetryMs = 1000;
+            state.sseRetryMs = 1000;
         };
 
-        eventSource.onmessage = function(e) {
+        state.eventSource.onmessage = function(e) {
             try {
                 var ev = JSON.parse(e.data);
-                processEvent(ev, true);
-                renderAgentCards();
-                renderMessages();
+                processEvent(ev);
+                refreshGraph();
             } catch(err) {
                 console.error("Failed to parse SSE event:", err, e.data);
             }
         };
 
-        eventSource.onerror = function() {
+        state.eventSource.onerror = function() {
             setConnectionStatus("disconnected");
-            eventSource.close();
-            eventSource = null;
+            state.eventSource.close();
+            state.eventSource = null;
 
-            // Exponential backoff reconnect
             setTimeout(function() {
                 connectSSE();
-            }, sseRetryMs);
+            }, state.sseRetryMs);
 
-            sseRetryMs = Math.min(sseRetryMs * 2, sseMaxRetryMs);
+            state.sseRetryMs = Math.min(state.sseRetryMs * 2, state.sseMaxRetryMs);
         };
     }
 
-    // ---- Boot ----
+    // ----------------------------------------------------------------
+    // Periodic refresh for particle animations and idle decay
+    // ----------------------------------------------------------------
+    setInterval(function() {
+        if (!graph) return;
+
+        var now = Date.now();
+
+        // Re-evaluate particle counts (they fade over time)
+        graph.linkDirectionalParticles(function(link) {
+            var age = now - link._lastActive;
+            if (age < 10000) return link._particles;
+            if (age < 30000) return 1;
+            return 0;
+        });
+    }, 5000);
+
+    // ----------------------------------------------------------------
+    // Handle window resize
+    // ----------------------------------------------------------------
+    window.addEventListener("resize", function() {
+        if (graph) {
+            graph.width(window.innerWidth);
+            graph.height(window.innerHeight);
+        }
+    });
+
+    // ----------------------------------------------------------------
+    // Boot
+    // ----------------------------------------------------------------
     loadInitialData();
 
 })();

@@ -184,6 +184,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
         GET /events        -> SSE stream of new activity events
         GET /api/activity  -> JSON array of all events
         GET /api/agents    -> JSON array of agent metadata
+        GET /api/files     -> JSON array of project files (path + type)
+        GET /api/vault     -> JSON array of vault notes (path + type + title)
     """
 
     # Suppress default logging -- we do our own
@@ -212,6 +214,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._serve_activity()
         elif self.path == "/api/agents":
             self._serve_agents()
+        elif self.path == "/api/files":
+            self._serve_files()
+        elif self.path == "/api/vault":
+            self._serve_vault()
         else:
             self.send_error(404)
 
@@ -235,6 +241,94 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def _serve_agents(self):
         self._send_json(self.server.agents)
+
+    def _serve_files(self):
+        """Walk project_dir and return a JSON array of up to 500 files.
+
+        Each entry: {"path": "<relative>", "type": "<extension without dot>"}
+        Directories in EXCLUDE_DIRS are skipped entirely.
+        """
+        EXCLUDE_DIRS = {
+            ".git", "node_modules", "__pycache__",
+            ".claude", ".obsidian", ".venv", "venv", "dist", "build",
+        }
+        MAX_FILES = 500
+
+        project_dir = self.server.project_dir
+        files = []
+
+        for root, dirs, filenames in os.walk(project_dir):
+            # Prune excluded directories in-place so os.walk skips them
+            dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+
+            for filename in sorted(filenames):
+                abs_path = Path(root) / filename
+                try:
+                    rel_path = abs_path.relative_to(project_dir)
+                except ValueError:
+                    continue
+
+                ext = abs_path.suffix.lstrip(".")
+                files.append({"path": str(rel_path), "type": ext})
+
+                if len(files) >= MAX_FILES:
+                    self._send_json(files)
+                    return
+
+        self._send_json(files)
+
+    def _serve_vault(self):
+        """Walk ~/.claude/vault/ and return a JSON array of vault notes.
+
+        Each entry: {"path": "<relative>", "type": "<dir-derived type>", "title": "<filename-derived>"}
+        Only .md files are included.
+        Type is determined from the immediate parent directory name using VAULT_TYPE_MAP.
+        Title is the stem with hyphens replaced by spaces, title-cased.
+        """
+        VAULT_TYPE_MAP = {
+            "decisions": "decision",
+            "retros": "retro",
+            "research": "research",
+            "architecture": "architecture",
+        }
+
+        vault_dir = self.server.vault_dir
+        notes = []
+
+        if not vault_dir.is_dir():
+            self._send_json(notes)
+            return
+
+        for root, dirs, filenames in os.walk(vault_dir):
+            # Sort dirs for deterministic ordering
+            dirs.sort()
+            root_path = Path(root)
+
+            for filename in sorted(filenames):
+                if not filename.endswith(".md"):
+                    continue
+
+                abs_path = root_path / filename
+                try:
+                    rel_path = abs_path.relative_to(vault_dir)
+                except ValueError:
+                    continue
+
+                # Type from immediate parent directory name
+                parent_name = abs_path.parent.name
+                note_type = VAULT_TYPE_MAP.get(parent_name, parent_name)
+
+                # Title from filename stem
+                stem = abs_path.stem
+                title = stem.replace("-", " ").title()
+
+                notes.append({
+                    "path": str(rel_path),
+                    "type": note_type,
+                    "title": title,
+                })
+
+        self._send_json(notes)
 
     def _serve_sse(self):
         """Stream new events as SSE (Server-Sent Events).
@@ -300,10 +394,12 @@ class DashboardServer(HTTPServer):
 
     allow_reuse_address = True
 
-    def __init__(self, server_address, handler_class, activity_file, agents):
+    def __init__(self, server_address, handler_class, activity_file, agents, project_dir):
         super().__init__(server_address, handler_class)
         self.activity_file = activity_file
         self.agents = agents
+        self.project_dir = project_dir
+        self.vault_dir = Path.home() / ".claude" / "vault"
         self.shutdown_event = threading.Event()
 
 
@@ -334,6 +430,7 @@ def main():
         DashboardHandler,
         activity_file,
         agents,
+        project_dir,
     )
 
     # Graceful shutdown on SIGINT / SIGTERM
