@@ -25,6 +25,7 @@ import sys
 import threading
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -389,8 +390,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
 # Server with graceful shutdown
 # ---------------------------------------------------------------------------
 
-class DashboardServer(HTTPServer):
-    """HTTPServer subclass that carries shared state and supports clean shutdown."""
+class DashboardServer(ThreadingMixIn, HTTPServer):
+    """Threaded HTTPServer that carries shared state and supports clean shutdown."""
+    daemon_threads = True
 
     allow_reuse_address = True
 
