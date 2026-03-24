@@ -401,9 +401,13 @@ header h1 span {
     // ----------------------------------------------------------------
     // Constants
     // ----------------------------------------------------------------
-    var CLUSTER_X_AGENT = 0;
-    var CLUSTER_X_FILE  = -350;
-    var CLUSTER_X_VAULT = 350;
+    // Triangle arrangement — three molecular clusters
+    var CLUSTERS = {
+        agent: { x: 0,    y: -80, z: 0    },
+        file:  { x: -220, y: 80,  z: -120 },
+        vault: { x: 220,  y: 80,  z: -120 }
+    };
+    var CLUSTER_PULL = 0.03; // soft pull toward cluster center
 
     var AGENT_ACTIVE_COLOR = "#58a6ff";
     var AGENT_IDLE_COLOR   = "#484f58";
@@ -538,9 +542,10 @@ header h1 span {
             action: "",
             color: AGENT_IDLE_COLOR,
             size: 16,
-            fx: CLUSTER_X_AGENT + (Math.random() - 0.5) * 60,
-            fy: undefined,
-            fz: undefined
+            cluster: "agent",
+            x: CLUSTERS.agent.x + (Math.random() - 0.5) * 80,
+            y: CLUSTERS.agent.y + (Math.random() - 0.5) * 80,
+            z: CLUSTERS.agent.z + (Math.random() - 0.5) * 80
         };
 
         state.nodes.push(node);
@@ -561,9 +566,10 @@ header h1 span {
             ext: ext,
             color: fileColor(filePath),
             size: 8,
-            fx: CLUSTER_X_FILE + (Math.random() - 0.5) * 80,
-            fy: undefined,
-            fz: undefined
+            cluster: "file",
+            x: CLUSTERS.file.x + (Math.random() - 0.5) * 60,
+            y: CLUSTERS.file.y + (Math.random() - 0.5) * 60,
+            z: CLUSTERS.file.z + (Math.random() - 0.5) * 60
         };
 
         state.nodes.push(node);
@@ -585,9 +591,10 @@ header h1 span {
             vaultType: type,
             color: vaultColor(type),
             size: 10,
-            fx: CLUSTER_X_VAULT + (Math.random() - 0.5) * 80,
-            fy: undefined,
-            fz: undefined
+            cluster: "vault",
+            x: CLUSTERS.vault.x + (Math.random() - 0.5) * 60,
+            y: CLUSTERS.vault.y + (Math.random() - 0.5) * 60,
+            z: CLUSTERS.vault.z + (Math.random() - 0.5) * 60
         };
 
         state.nodes.push(node);
@@ -919,13 +926,25 @@ header h1 span {
             });
 
         // ---- Forces ----
-        graph.d3Force("charge").strength(-80);
+        graph.d3Force("charge").strength(-120);
         graph.d3Force("link").distance(function(link) {
-            if (link.edgeType === "agent-agent") return 40;
-            if (link.edgeType === "spawn") return 30;
-            return 60;
+            if (link.edgeType === "agent-agent") return 50;
+            if (link.edgeType === "spawn") return 40;
+            return 80;
         });
         graph.d3Force("center", null);
+
+        // Custom clustering force — gently pull nodes toward their cluster center
+        graph.d3Force("cluster", function(alpha) {
+            state.nodes.forEach(function(node) {
+                var c = CLUSTERS[node.cluster];
+                if (!c) return;
+                var k = CLUSTER_PULL * alpha;
+                node.vx += (c.x - node.x) * k;
+                node.vy += (c.y - node.y) * k;
+                node.vz += (c.z - node.z) * k;
+            });
+        });
 
         // Add lights for Phong materials
         var T = getTHREE();
