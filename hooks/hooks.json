@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if ! pgrep -f 'dashboard/server.py' > /dev/null 2>&1; then mkdir -p .claude/team && nohup uv run python \"$CLAUDE_PLUGIN_ROOT/dashboard/server.py\" --project-dir \"$(pwd)\" > .claude/team/dashboard.log 2>&1 & sleep 1; URL=$(grep -oP 'http://[^ ]+' .claude/team/dashboard.log 2>/dev/null | head -1); if [ -n \"$URL\" ]; then (xdg-open \"$URL\" 2>/dev/null || open \"$URL\" 2>/dev/null) & fi; fi"
+            "command": "mkdir -p .claude/team; if ! pgrep -f 'dashboard/server.py' > /dev/null 2>&1; then nohup uv run python \"$CLAUDE_PLUGIN_ROOT/dashboard/server.py\" --project-dir \"$(pwd)\" > .claude/team/dashboard.log 2>&1 & sleep 1; URL=$(grep -oP 'http://[^ ]+' .claude/team/dashboard.log 2>/dev/null | head -1); if [ -n \"$URL\" ]; then (xdg-open \"$URL\" 2>/dev/null || open \"$URL\" 2>/dev/null) & fi; fi"
           },
           {
             "type": "prompt",
@@ -21,7 +21,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "INPUT=$(cat); AGENT=$(echo \"$INPUT\" | jq -r '.tool_input.subagent_type // .tool_input.name // \"agent\"'); DESC=$(echo \"$INPUT\" | jq -r '.tool_input.description // \"\"'); jq -nc --arg ts \"$(date -Iseconds)\" --arg detail \"$AGENT: $DESC\" '{ts:$ts,agent:\"orchestrator\",event:\"spawn\",detail:$detail}' >> .claude/team/activity.jsonl 2>/dev/null"
+            "command": "mkdir -p .claude/team; INPUT=$(cat); AGENT=$(echo \"$INPUT\" | jq -r '.tool_input.subagent_type // .tool_input.name // \"agent\"'); DESC=$(echo \"$INPUT\" | jq -r '.tool_input.description // \"\"'); jq -nc --arg ts \"$(date -Iseconds)\" --arg detail \"$AGENT: $DESC\" '{ts:$ts,agent:\"orchestrator\",event:\"spawn\",detail:$detail}' >> .claude/team/activity.jsonl"
           }
         ]
       }
