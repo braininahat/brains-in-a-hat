@@ -7,6 +7,7 @@ Python stdlib-only HTTP server that:
 - SSE endpoint /events that tails activity.jsonl and streams new events
 - REST endpoint /api/activity that returns all events
 - REST endpoint /api/agents that returns agent metadata from agents/ directory
+- REST endpoint /api/projects that returns recently active projects
 - Graceful shutdown on SIGINT
 
 Usage:
@@ -14,6 +15,9 @@ Usage:
 
 The --project-dir flag specifies where .claude/team/activity.jsonl lives.
 If omitted, defaults to the current working directory.
+
+All /api/activity, /api/files, and /events endpoints accept an optional
+?project=<path> query parameter to target a specific project directory.
 """
 
 import argparse
@@ -24,9 +28,11 @@ import socket
 import sys
 import threading
 import time
+from datetime import datetime, timezone, timedelta
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from pathlib import Path
+from urllib.parse import urlparse, parse_qs
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -40,6 +46,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PLUGIN_DIR = SCRIPT_DIR.parent
 AGENTS_DIR = PLUGIN_DIR / "agents"
 INDEX_HTML = SCRIPT_DIR / "index.html"
+
+ACTIVE_SESSIONS_PATH = Path.home() / ".claude" / "team" / "active-sessions.jsonl"
 
 
 def parse_args():
@@ -104,6 +112,78 @@ def load_agents():
         })
 
     return agents
+
+
+# ---------------------------------------------------------------------------
+# Projects loader
+# ---------------------------------------------------------------------------
+
+def load_projects():
+    """Read active-sessions.jsonl, deduplicate by project path, filter to 24h.
+
+    Each line in the file is expected to have at least a "project" key (absolute
+    path string) and a "ts" key (ISO-8601 timestamp).  An optional "name" key
+    provides a human-readable label.
+
+    Returns a list of dicts sorted by most-recent activity:
+        [{"project": "/abs/path", "ts": "2026-...", "name": "my-project"}, ...]
+    """
+    projects = []
+    if not ACTIVE_SESSIONS_PATH.is_file():
+        return projects
+
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=24)
+
+    # Keyed by project path -> most recent entry
+    seen = {}
+
+    try:
+        with open(ACTIVE_SESSIONS_PATH, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                project = entry.get("project", "")
+                ts_raw = entry.get("ts", "")
+                if not project or not ts_raw:
+                    continue
+
+                # Parse timestamp; accept with or without trailing Z
+                try:
+                    ts_str = ts_raw.replace("Z", "+00:00")
+                    ts = datetime.fromisoformat(ts_str)
+                    # Ensure tz-aware
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    continue
+
+                if ts < cutoff:
+                    continue
+
+                if project not in seen or ts > datetime.fromisoformat(
+                    seen[project]["ts"].replace("Z", "+00:00")
+                ):
+                    seen[project] = {
+                        "project": project,
+                        "ts": ts_raw,
+                        "name": entry.get("name", Path(project).name),
+                    }
+    except OSError:
+        pass
+
+    # Sort by most recent first
+    projects = sorted(
+        seen.values(),
+        key=lambda e: e["ts"],
+        reverse=True,
+    )
+    return projects
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +267,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
         GET /api/agents    -> JSON array of agent metadata
         GET /api/files     -> JSON array of project files (path + type)
         GET /api/vault     -> JSON array of vault notes (path + type + title)
+        GET /api/projects  -> JSON array of recently active projects
+
+    All data endpoints accept an optional ?project=<abs-path> query parameter.
+    When provided, that directory is used instead of the server default.
     """
 
     # Suppress default logging -- we do our own
@@ -207,20 +291,39 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
 
     def do_GET(self):
-        if self.path == "/" or self.path == "/index.html":
+        parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query)
+        path = parsed.path
+
+        if path == "/" or path == "/index.html":
             self._serve_index()
-        elif self.path == "/events":
-            self._serve_sse()
-        elif self.path == "/api/activity":
-            self._serve_activity()
-        elif self.path == "/api/agents":
+        elif path == "/events":
+            self._serve_sse(qs)
+        elif path == "/api/activity":
+            self._serve_activity(qs)
+        elif path == "/api/agents":
             self._serve_agents()
-        elif self.path == "/api/files":
-            self._serve_files()
-        elif self.path == "/api/vault":
+        elif path == "/api/files":
+            self._serve_files(qs)
+        elif path == "/api/vault":
             self._serve_vault()
+        elif path == "/api/projects":
+            self._serve_projects()
         else:
             self.send_error(404)
+
+    def _resolve_project_dir(self, qs):
+        """Return a resolved Path for the project directory.
+
+        Uses the ?project=<path> query parameter when present; falls back to
+        the server-level default (self.server.project_dir).
+        """
+        project_values = qs.get("project", [])
+        if project_values:
+            candidate = Path(project_values[0]).resolve()
+            if candidate.is_dir():
+                return candidate
+        return self.server.project_dir
 
     def _serve_index(self):
         try:
@@ -235,15 +338,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(content)
 
-    def _serve_activity(self):
-        activity_file = self.server.activity_file
+    def _serve_activity(self, qs):
+        project_dir = self._resolve_project_dir(qs)
+        activity_path = project_dir / ".claude" / "team" / "activity.jsonl"
+        activity_file = ActivityFile(activity_path)
         events = activity_file.read_all()
         self._send_json(events)
 
     def _serve_agents(self):
         self._send_json(self.server.agents)
 
-    def _serve_files(self):
+    def _serve_files(self, qs):
         """Walk project_dir and return a JSON array of up to 500 files.
 
         Each entry: {"path": "<relative>", "type": "<extension without dot>"}
@@ -251,11 +356,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
         """
         EXCLUDE_DIRS = {
             ".git", "node_modules", "__pycache__",
-            ".claude", ".obsidian", ".venv", "venv", "dist", "build",
+            ".claude", ".obsidian", ".venv", "venv", "dist", "build", ".env",
         }
         MAX_FILES = 500
 
-        project_dir = self.server.project_dir
+        project_dir = self._resolve_project_dir(qs)
         files = []
 
         for root, dirs, filenames in os.walk(project_dir):
@@ -331,7 +436,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         self._send_json(notes)
 
-    def _serve_sse(self):
+    def _serve_projects(self):
+        """Return recently active projects from active-sessions.jsonl."""
+        self._send_json(load_projects())
+
+    def _serve_sse(self, qs):
         """Stream new events as SSE (Server-Sent Events).
 
         Each event is sent as:
@@ -339,6 +448,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         A keepalive comment is sent every SSE_KEEPALIVE seconds to prevent
         proxy/browser timeouts.
+
+        Accepts an optional ?project=<path> query parameter to tail a specific
+        project's activity file.
         """
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -347,6 +459,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_header("X-Accel-Buffering", "no")
         self._send_cors_headers()
         self.end_headers()
+
+        project_dir = self._resolve_project_dir(qs)
+        activity_path = project_dir / ".claude" / "team" / "activity.jsonl"
+        activity_file = ActivityFile(activity_path)
 
         stop = threading.Event()
         last_keepalive = time.monotonic()
@@ -363,7 +479,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         # Start tailing in a background thread
         tail_thread = threading.Thread(
-            target=self.server.activity_file.tail,
+            target=activity_file.tail,
             args=(stop, on_event),
             daemon=True,
         )
@@ -396,9 +512,8 @@ class DashboardServer(ThreadingMixIn, HTTPServer):
 
     allow_reuse_address = True
 
-    def __init__(self, server_address, handler_class, activity_file, agents, project_dir):
+    def __init__(self, server_address, handler_class, agents, project_dir):
         super().__init__(server_address, handler_class)
-        self.activity_file = activity_file
         self.agents = agents
         self.project_dir = project_dir
         self.vault_dir = Path.home() / ".claude" / "vault"
@@ -422,7 +537,6 @@ def main():
     # Ensure the activity directory exists
     activity_path.parent.mkdir(parents=True, exist_ok=True)
 
-    activity_file = ActivityFile(activity_path)
     agents = load_agents()
 
     port = find_free_port(args.port)
@@ -430,7 +544,6 @@ def main():
     server = DashboardServer(
         ("127.0.0.1", port),
         DashboardHandler,
-        activity_file,
         agents,
         project_dir,
     )
