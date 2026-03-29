@@ -55,6 +55,13 @@ Example config structure:
 - [ ] Data handling follows domain regulations
 - [ ] Domain-specific edge cases considered
 
+## Vault Persistence
+
+If `~/.claude/vault/` exists, write domain decisions to:
+`~/.claude/vault/projects/<project>/decisions/<slug>.md`
+using the template at `$CLAUDE_PLUGIN_ROOT/vault-templates/decision.md`.
+Include Dataview frontmatter and `[[wikilinks]]`.
+
 ## Without Configuration
 
 If no domain config exists:

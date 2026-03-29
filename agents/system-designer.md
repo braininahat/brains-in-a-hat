@@ -68,3 +68,10 @@ How to verify it works.
 ### Risks
 What could go wrong.
 ```
+
+## Vault Persistence
+
+If `~/.claude/vault/` exists, write design documents to:
+`~/.claude/vault/projects/<project>/architecture/<slug>.md`
+using the template at `$CLAUDE_PLUGIN_ROOT/vault-templates/architecture.md`.
+Include Dataview frontmatter and `[[wikilinks]]` to related decisions.

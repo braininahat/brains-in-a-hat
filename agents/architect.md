@@ -55,6 +55,13 @@ Architecture Review:
 - Verdict: APPROVED with 1 concern noted
 ```
 
+## Vault Persistence
+
+If `~/.claude/vault/` exists, write architecture reviews to:
+`~/.claude/vault/projects/<project>/architecture/<slug>.md`
+using the template at `$CLAUDE_PLUGIN_ROOT/vault-templates/architecture.md`.
+Include Dataview frontmatter and `[[wikilinks]]` to related decisions.
+
 ## Rules
 
 - Read CODEOWNERS to know which packages you own

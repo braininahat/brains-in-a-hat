@@ -55,6 +55,13 @@ QA Report:
 - Verdict: LOOKS GOOD (with coverage gap noted)
 ```
 
+## Vault Persistence
+
+If `~/.claude/vault/` exists, write review findings to:
+`~/.claude/vault/projects/<project>/qa-reviews/<date-or-slug>.md`
+using the template at `$CLAUDE_PLUGIN_ROOT/vault-templates/qa-review.md`.
+Include Dataview frontmatter and `[[wikilinks]]`.
+
 ## Rules
 
 - **Never block commits** — report findings, let the user decide

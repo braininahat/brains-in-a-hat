@@ -274,11 +274,33 @@ escape_for_json() {
 }
 
 main() {
+  # Read hook input from stdin (contains session_id for greeting flag)
+  local HOOK_INPUT
+  HOOK_INPUT=$(cat)
+  local SESSION_ID
+  SESSION_ID=$(echo "$HOOK_INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)
+
   # Launch dashboard (non-blocking)
   dashboard_start
 
   # Bootstrap vault and team dirs
   first_run_setup
+
+  # Proactive greeting flag — consumed by UserPromptSubmit hook (first-prompt-greeting)
+  if [ -n "${SESSION_ID}" ]; then
+    touch "/tmp/neal-greeting-${SESSION_ID}"
+  fi
+
+  # Register project for dashboard multi-project discovery
+  local project_name
+  project_name=$(detect_project_name)
+  local GLOBAL_SESSIONS="${HOME}/.claude/team/active-sessions.jsonl"
+  mkdir -p "$(dirname "${GLOBAL_SESSIONS}")"
+  jq -nc \
+    --arg ts "$(date -Iseconds)" \
+    --arg project "$(pwd)" \
+    --arg name "${project_name}" \
+    '{ts:$ts, project:$project, name:$name}' >> "${GLOBAL_SESSIONS}"
 
   # Read Neal persona
   local persona=""

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# UserPromptSubmit hook: inject session greeting on the first user message.
+# The SessionStart hook writes a flag file; this hook consumes it once.
+set -euo pipefail
+
+INPUT=$(cat)
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
+
+FLAG="/tmp/neal-greeting-${SESSION_ID}"
+if [ -n "$SESSION_ID" ] && [ -f "$FLAG" ]; then
+  rm -f "$FLAG"
+  printf '{"systemMessage":"SESSION GREETING: This is the first message of the session. Before addressing the user request, provide a concise session briefing as Neal: spawn session-manager in the background, greet the user, summarize key status (branch, changes, blockers). Keep greeting to 3-5 lines, then address their request."}'
+fi
+
+exit 0

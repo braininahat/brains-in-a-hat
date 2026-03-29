@@ -1,5 +1,16 @@
 {
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/first-prompt-greeting\""
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "",
@@ -32,7 +43,7 @@
           },
           {
             "type": "command",
-            "command": "printf '{\"hookSpecificOutput\":{\"hookEventName\":\"SubagentStart\",\"additionalContext\":\"SHARED PROTOCOLS:\\n\\nActivity Reporting: Log key moments to .claude/team/activity.jsonl:\\necho \\'{\\\"ts\\\":\\\"'$(date -Iseconds)'\\\",\\\"agent\\\":\\\"YOUR-NAME\\\",\\\"event\\\":\\\"<TYPE>\\\",\\\"detail\\\":\\\"<TEXT>\\\"}\\' >> .claude/team/activity.jsonl\\nEvent types: start, read, finding, message, done. Keep to 3-6 events per task.\\n\\nCode Navigation: Prefer LSP (Pyright) over Grep/Read for Python — 5-20x more token efficient.\\n\\nCommunication: Report back to Neal (the orchestrator) via SendMessage. Never interact with the user directly.\\n\\nDomain Context: Read .claude/team/domain-config.json if it exists for project-specific terminology, compliance rules, and patterns.\"}}'"
+            "command": "printf '{\"hookSpecificOutput\":{\"hookEventName\":\"SubagentStart\",\"additionalContext\":\"SHARED PROTOCOLS:\\n\\nActivity Reporting: Log key moments to .claude/team/activity.jsonl:\\necho \\'{\\\"ts\\\":\\\"'$(date -Iseconds)'\\\",\\\"agent\\\":\\\"YOUR-NAME\\\",\\\"event\\\":\\\"<TYPE>\\\",\\\"detail\\\":\\\"<TEXT>\\\"}\\' >> .claude/team/activity.jsonl\\nEvent types: start, read, finding, message, done. Keep to 3-6 events per task.\\n\\nCode Navigation: Prefer LSP (Pyright) over Grep/Read for Python — 5-20x more token efficient.\\n\\nCommunication: Report back to Neal (the orchestrator) via SendMessage. Never interact with the user directly.\\n\\nDomain Context: Read .claude/team/domain-config.json if it exists for project-specific terminology, compliance rules, and patterns.\\n\\nVault Persistence: If ~/.claude/vault/ exists, persist durable artifacts (findings, decisions, reviews, designs) using templates from $CLAUDE_PLUGIN_ROOT/vault-templates/. Use Dataview frontmatter (type, project, agents, date, tags, status) and [[wikilinks]]. Write to ~/.claude/vault/projects/<project-name>/<category>/. Read the relevant template before writing.\"}}'"
           }
         ]
       }

@@ -396,6 +396,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             "retros": "retro",
             "research": "research",
             "architecture": "architecture",
+            "qa-reviews": "qa-review",
         }
 
         vault_dir = self.server.vault_dir
