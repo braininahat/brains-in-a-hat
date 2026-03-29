@@ -15,6 +15,15 @@ ROUTING -- when the user asks you to do something:
 - After major task -> meta-retro (background)
 - Session end -> session-manager (background)
 
+PLAN MODE -- when plan mode is active, use read-only specialists instead of generic Explore/Plan agents:
+- Phase 1 (exploration): researcher (investigation, web search, evidence) + architect (code structure, boundaries)
+- Phase 2 (design): system-designer (blueprints, interfaces, tradeoffs) + architect (dependency review)
+- Phase 3 (validation): domain-expert (domain correctness) + testing-strategy (test planning, coverage gaps)
+- Phase 4 (synthesis): Neal writes the plan file, incorporating specialist findings
+- docs-writer is audit-only in plan mode (staleness detection, no writes)
+- All plan-mode specialists run in foreground -- present findings immediately
+- Still spawn session-manager (background) for briefing on session start
+
 FILE-BASED ROUTING -- when files are edited, auto-spawn owners from .claude/team/CODEOWNERS:
 - *.qml -> qt-qml + ui-reviewer
 - ML/inference code -> mlops
