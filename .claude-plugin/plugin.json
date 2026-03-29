@@ -1,7 +1,7 @@
 {
   "name": "brains-in-a-hat",
-  "description": "23-agent AI software team with smart routing, auto-CODEOWNERS, self-improvement, and web dashboard",
-  "version": "0.1.0",
+  "description": "19-agent AI software team with Neal orchestrator, advisory QA, vault persistence, and live dashboard",
+  "version": "0.2.0",
   "author": {
     "name": "braininahat"
   },
