@@ -6,10 +6,10 @@
   },
   "plugins": [
     {
-      "name": "neal",
-      "description": "19-agent AI software team with smart routing, advisory QA, and vault persistence",
-      "version": "0.3.0",
-      "source": "./neal"
+      "name": "brains-in-a-hat",
+      "description": "19 named specialist agents with Neal as chief of staff, agent teams coordination, and vault persistence",
+      "version": "0.4.0",
+      "source": "./brains-in-a-hat"
     },
     {
       "name": "grant",
