@@ -1,6 +1,6 @@
 ---
 type: dashboard
-write-path: "~/.claude/vault/projects/{{project}}/"
+write-path: "~/.brains_in_a_hat/vault/projects/{{project}}/"
 tags: [dashboard, index]
 ---
 # Dashboard

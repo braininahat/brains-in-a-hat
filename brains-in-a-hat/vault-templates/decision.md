@@ -1,6 +1,6 @@
 ---
 type: decision
-write-path: "~/.claude/vault/projects/{{project}}/decisions/"
+write-path: "~/.brains_in_a_hat/vault/projects/{{project}}/decisions/"
 project: "{{project}}"
 agents: []
 date: "{{date}}"

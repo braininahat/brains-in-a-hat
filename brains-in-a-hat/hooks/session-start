@@ -26,7 +26,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-VAULT_DIR="${HOME}/.claude/vault"
+VAULT_DIR="${HOME}/.brains_in_a_hat/vault"
 TEAM_DIR=".claude/team"
 
 # ── Dashboard auto-start ─────────────────────────────────────────────
@@ -65,6 +65,8 @@ first_run_setup() {
     mkdir -p "${VAULT_DIR}/universal/content"
     mkdir -p "${VAULT_DIR}/projects"
   fi
+
+  mkdir -p "${VAULT_DIR}/wiki"
 
   # Project team directory
   if [ ! -d "${TEAM_DIR}" ]; then
@@ -112,18 +114,16 @@ tests/               testing-strategy
 CODEOWNERS
   fi
 
-  # Obsidian config (only if Obsidian is installed)
+  # Obsidian config (always created — vault is Obsidian-compatible)
   if [ ! -d "${VAULT_DIR}/.obsidian" ]; then
-    if command -v obsidian &>/dev/null || [ -d "${HOME}/.obsidian" ] || [ -d "${HOME}/.config/obsidian" ]; then
-      mkdir -p "${VAULT_DIR}/.obsidian"
-      cat > "${VAULT_DIR}/.obsidian/app.json" << 'OBSIDIAN'
+    mkdir -p "${VAULT_DIR}/.obsidian"
+    cat > "${VAULT_DIR}/.obsidian/app.json" << 'OBSIDIAN'
 {
   "promptDelete": false,
   "alwaysUpdateLinks": true,
   "newLinkFormat": "relative"
 }
 OBSIDIAN
-    fi
   fi
 }
 
@@ -391,7 +391,7 @@ build_context() {
   local context=""
   context+="## Project: ${project_name}\n"
   context+="PM tier: ${pm_tier}\n"
-  context+="Vault: ~/.claude/vault/projects/${project_name}/\n\n"
+  context+="Vault: ~/.brains_in_a_hat/vault/projects/${project_name}/\n\n"
 
   context+="## Git State\n"
   context+="$(gather_git_data)\n\n"

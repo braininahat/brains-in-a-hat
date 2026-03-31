@@ -64,8 +64,8 @@ Example config structure:
 
 ## Vault Persistence
 
-If `~/.claude/vault/` exists, write domain decisions to:
-`~/.claude/vault/projects/<project>/decisions/<slug>.md`
+If `~/.brains_in_a_hat/vault/` exists, write domain decisions to:
+`~/.brains_in_a_hat/vault/projects/<project>/decisions/<slug>.md`
 using the template at `$CLAUDE_PLUGIN_ROOT/vault-templates/decision.md`.
 Include Dataview frontmatter and `[[wikilinks]]`.
 
