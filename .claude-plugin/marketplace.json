@@ -1,15 +1,21 @@
 {
   "name": "braininahat",
-  "description": "23-agent AI software team with smart routing, self-improvement, and proactive DX",
+  "description": "AI agents for Claude Code — team orchestration and visual communication",
   "owner": {
     "name": "braininahat"
   },
   "plugins": [
     {
-      "name": "brains-in-a-hat",
-      "description": "23-agent AI software team plugin for Claude Code",
+      "name": "neal",
+      "description": "19-agent AI software team with smart routing, advisory QA, and vault persistence",
+      "version": "0.3.0",
+      "source": "./neal"
+    },
+    {
+      "name": "grant",
+      "description": "Visual-first communicator — answers questions through interactive HTML visualizations",
       "version": "0.1.0",
-      "source": "./"
+      "source": "./grant"
     }
   ]
 }
