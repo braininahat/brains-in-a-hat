@@ -1,6 +1,26 @@
 #!/usr/bin/env bash
-# SessionStart hook for brains-in-a-hat plugin
-# Reads Neal persona, gathers project state, launches dashboard.
+#
+# session-start — SessionStart hook for the brains-in-a-hat plugin
+#
+# Purpose:
+#   Runs once at the start of every Claude Code session. Bootstraps the
+#   vault/team directory structure on first use, starts the global dashboard
+#   server if it is not already running, and assembles a rich context block
+#   (persona + live project state) that is injected into Claude's system
+#   prompt for the session.
+#
+# Steps:
+#   1. Start dashboard server (non-blocking, idempotent)
+#   2. Bootstrap vault dirs, CODEOWNERS, and Obsidian config (first-run)
+#   3. Write a greeting flag consumed by the UserPromptSubmit hook
+#   4. Append a session record to ~/.claude/team/active-sessions.jsonl
+#   5. Load Neal persona from hooks/neal-persona.md
+#   6. Gather dynamic context: git state, backlog, memory, vault state,
+#      vault index, CODEOWNERS, and pending retro proposals
+#   7. Emit a JSON object with hookEventName + additionalContext for Claude
+#
+# Inputs  (stdin): JSON hook payload — used to extract session_id
+# Outputs (stdout): JSON { hookSpecificOutput: { hookEventName, additionalContext } }
 
 set -euo pipefail
 
@@ -469,6 +489,8 @@ main() {
   else
     full_context="${dynamic_context}"
   fi
+
+  full_context="${full_context}\n\nPLAN MODE DETECTION: If a system reminder says plan mode is active, follow PLAN MODE SPAWN protocol instead of ON SESSION START."
 
   local escaped_context
   escaped_context=$(escape_for_json "${full_context}")

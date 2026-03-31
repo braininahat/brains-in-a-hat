@@ -1,21 +1,31 @@
 # brains-in-a-hat
 
-A 23-agent AI software team for Claude Code. Smart routing, auto-CODEOWNERS, self-improvement, and proactive DX suggestions.
+A 19-agent AI software team for Claude Code. Smart routing, auto-CODEOWNERS, self-improvement, and proactive DX suggestions.
 
 ## Install
 
 ```bash
-claude plugins add /path/to/brains-in-a-hat
+# Install the team plugin
+claude plugins add /path/to/brains-in-a-hat/brains-in-a-hat
+
+# Install the visualization plugin (optional)
+claude plugins add /path/to/brains-in-a-hat/grant
 ```
+
+## Plugins
+
+| Plugin | Purpose |
+|--------|---------|
+| `brains-in-a-hat` | 19-agent dev team — routing, QA, memory, retrospectives |
+| `grant` | Visualization agent — architecture diagrams, git activity, code maps |
 
 ## Team Roster
 
 ### Always Active
 | Agent | Role |
 |-------|------|
-| Tech Lead | Orchestrates team, routes tasks, synthesizes findings |
 | Session Manager | Briefings at session start, memory updates at end |
-| QA Engineer | Tests before every commit, blocks if tests fail |
+| QA Engineer | Advisory QA reviews before commits |
 | Meta/Retro | Retrospectives, DX suggestions, CODEOWNERS maintenance |
 
 ### Routed by Task Type
@@ -30,11 +40,10 @@ claude plugins add /path/to/brains-in-a-hat
 | Hardware/Device | Probe protocol, WiFi, USB, V4L2 |
 | Domain Expert | Clinical/domain-specific validation |
 | Profiler | Performance, latency, memory |
-| Research Analyst | Technical investigation, benchmarks |
+| Researcher | Technical investigation, benchmarks |
 | Data/Schema | SQLite, migrations, config |
 | UX/Workflow | End-to-end user flows |
 | Testing Strategy | Test suite design, coverage |
-| IP/Patent | Technical disclosures, novelty |
 
 ### Periodic/On-Demand
 | Agent | Role |
@@ -42,23 +51,34 @@ claude plugins add /path/to/brains-in-a-hat
 | DevOps | CI/CD, GitHub Actions |
 | Packaging | AppImage, Docker, PyInstaller |
 | Docs Writer | Specs, CLAUDE.md, API docs |
-| Issue Triager | GitHub issue management |
-| Code Janitor | Dead code, stale TODOs, hygiene |
 
 ## Features
 
-- **Smart routing** — Tech Lead activates 4-6 agents per task based on files touched
+- **Smart routing** — Neal (orchestrator) activates 4-6 agents per task based on files touched
 - **Auto-CODEOWNERS** — Meta Agent generates ownership mapping on install, maintains during retros
 - **Self-improvement** — retrospectives after major tasks, agent prompt updates
 - **Proactive DX** — suggests hooks, aliases, workflow improvements (rate-limited)
-- **Pre-commit enforcement** — QA must approve before commits to owned paths
+- **Advisory QA** — QA reviews are advisory; they never block commits
 
 ## Skills
 
-- `/team-briefing` — Session start briefing
-- `/team-debrief` — Session end memory update
-- `/team-retro` — Post-task retrospective
-- `/team-dashboard` — Launch web dashboard (Phase 2)
+### brains-in-a-hat
+- `/team-briefing` — Session start briefing: branch status, uncommitted changes, open tasks
+- `/team-debrief` — Session end memory update: save decisions, WIP, workflow changes
+- `/team-retro` — Post-task retrospective: what went well, what to improve
+- `/team-review` — QA review of staged/modified changes before commit
+- `/team-cleanup` — Find dead code, unused imports, stale TODOs
+
+### grant
+- `/grant` — Visualize architecture, git activity, code structure, or agent topology
+
+## Dashboard
+
+The dashboard auto-starts via the `session-start` hook each time a Claude Code session opens. It requires Python 3 or `uv` to be available on `$PATH`.
+
+- Runs at `http://localhost:8787` by default
+- Accepts a `?project=<path>` query parameter for multi-project use
+- Logs to `.claude/team/dashboard.log` in the current project
 
 ## Configuration
 

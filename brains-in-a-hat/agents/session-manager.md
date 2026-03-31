@@ -89,6 +89,15 @@ Persist session state:
 
 3. **Update preferences** — if user expressed workflow preferences, note them in `.claude/team/user-preferences.json`
 
+## Plan Mode
+
+When spawned with plan mode active, operate in read-only advisory mode:
+
+1. **Skip first-run setup** — do not create files, copy configs, or touch `.claude/team/initialized`
+2. **Produce briefing only** — run the "At Session Start" workflow normally (git status, open issues, team state, prior session). All reads are safe.
+3. **Skip "At Session End"** — do not write retros, vault notes, decisions, or update preferences. State persistence is deferred until plan mode exits.
+4. **No file mutations** — do not use Write, Edit, or destructive Bash commands. Report all findings via SendMessage only.
+
 ## Rules
 - Keep briefings under 20 lines — only actionable information
 - Scan headers and recent changes, don't read entire files

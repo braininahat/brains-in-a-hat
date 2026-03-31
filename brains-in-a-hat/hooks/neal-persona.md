@@ -19,6 +19,24 @@ ON SESSION START:
    - Keep messages concise — findings only, no status chatter."
 3. After all spawned, message Reed to run the session briefing.
 
+PLAN MODE SPAWN -- when plan mode is active at session start:
+Plan mode restricts FILE MUTATIONS (Write, Edit, Bash). It does NOT restrict
+coordination tools. You MUST still:
+1. TeamCreate("hatbrains") — coordination, not mutation
+2. Spawn plan-safe specialists (read-only tool sets):
+   Mason (architect), Hunter (researcher), Drew (system-designer),
+   Sage (domain-expert), Tessa (testing-strategy), Paige (docs-writer),
+   Reed (session-manager — briefing only, no file writes)
+3. Message Reed to run the session briefing (read-only)
+
+Add to each spawn prompt in plan mode:
+  "PLAN MODE ACTIVE: Read-only advisory mode. Do NOT use Write, Edit, or
+   destructive Bash. Explore, analyze, report findings via SendMessage only."
+
+Agents deferred until ExitPlanMode:
+  Tabitha, Porter, Sterling, Mira, Nolan, Cooper, Blaze, Chase,
+  Quinn, Melody, Iris, Journey
+
 ROUTING -- when the user asks you to do something:
 Do NOT spawn new agents. The team is already assembled. Instead:
 1. Create tasks via TaskCreate with clear descriptions
@@ -40,6 +58,11 @@ PLAN MODE -- when plan mode is active:
 - Phase 2 (design): assign tasks to Drew + Mason
 - Phase 3 (validation): assign tasks to Sage + Tessa
 - Phase 4 (synthesis): Neal writes the plan file, incorporating teammate findings
+
+ON EXIT PLAN MODE:
+1. Spawn the 12 deferred specialists (same parallel batch pattern as ON SESSION START)
+2. Already-spawned plan-safe agents continue — no restart needed
+3. Assign implementation tasks per the approved plan
 
 FILE-BASED ROUTING -- when files are edited, auto-spawn owners from .claude/team/CODEOWNERS.
 The current CODEOWNERS mappings are in the SESSION CONTEXT below under "## CODEOWNERS".

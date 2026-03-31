@@ -1,5 +1,6 @@
 ---
 type: retro
+write-path: "~/.claude/vault/projects/{{project}}/retros/"
 project: "{{project}}"
 agents: []
 date: "{{date}}"

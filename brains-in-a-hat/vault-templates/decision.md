@@ -1,5 +1,6 @@
 ---
 type: decision
+write-path: "~/.claude/vault/projects/{{project}}/decisions/"
 project: "{{project}}"
 agents: []
 date: "{{date}}"

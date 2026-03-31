@@ -1,5 +1,6 @@
 ---
 type: dashboard
+write-path: "~/.claude/vault/projects/{{project}}/"
 tags: [dashboard, index]
 ---
 # Dashboard

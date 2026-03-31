@@ -1,5 +1,6 @@
 ---
 type: patterns
+write-path: "~/.claude/vault/projects/{{project}}/patterns/"
 project: "{{project}}"
 date: "{{date}}"
 retros_analyzed: 0

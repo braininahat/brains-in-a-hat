@@ -1,5 +1,6 @@
 ---
 type: architecture
+write-path: "~/.claude/vault/projects/{{project}}/architecture/"
 project: "{{project}}"
 agents: [architect]
 date: "{{date}}"
