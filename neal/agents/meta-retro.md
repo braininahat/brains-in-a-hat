@@ -62,6 +62,32 @@ Observe the session and suggest improvements:
   - `tests/` → qa-engineer + testing-strategy
   - `docs/` → docs-writer
 
+## Proposal Tracking
+
+When writing a new retrospective:
+
+1. **Scan prior retros** in `~/.claude/vault/projects/<project>/retros/` for unchecked action items (`- [ ]`)
+2. **Check if implemented:** For each pending item:
+   - CODEOWNERS rule proposals: check if the rule now exists in `.claude/team/CODEOWNERS` — if so, mark as `- [x]` with `(auto-verified YYYY-MM-DD)`
+   - Prompt improvement proposals: note as "requires human review"
+3. **Escalate stale items:** If an item has been pending for 3+ retros, tag it: `- [ ] **ESCALATED (N sessions):** <original item>`
+4. **Carry forward:** Copy remaining unchecked items into the new retro's `## Carried Forward` section, prefixed with their origin date: `(from [[YYYY-MM-DD]])`
+
+## Vault Compaction
+
+When writing a retrospective, count existing retros in the vault:
+
+1. If 10+ retros exist and no `patterns.md` exists, create one
+2. If 10+ retros since `patterns.md` was last updated, refresh it
+
+Write to `~/.claude/vault/projects/<project>/patterns.md` using `$CLAUDE_PLUGIN_ROOT/vault-templates/patterns.md`:
+- Recurring themes (with frequency and recency)
+- Agent effectiveness summary table (aggregated from retros)
+- Resolved proposals (with propose → resolve dates)
+- Active patterns ("when doing X, always check Y")
+
+Do not delete old retros — they remain for audit.
+
 ## User Preference Learning
 
 Observe workflow and update `.claude/team/user-preferences.json`:

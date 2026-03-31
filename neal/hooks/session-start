@@ -62,6 +62,12 @@ first_run_setup() {
     mkdir -p "${project_vault}/decisions"
   fi
 
+  # Dashboard note for Obsidian Dataview
+  local dashboard_note="${project_vault}/dashboard.md"
+  if [ ! -f "${dashboard_note}" ]; then
+    cp "${PLUGIN_ROOT}/vault-templates/dashboard.md" "${dashboard_note}" 2>/dev/null || true
+  fi
+
   # CODEOWNERS (if missing)
   if [ ! -f "${TEAM_DIR}/CODEOWNERS" ]; then
     cat > "${TEAM_DIR}/CODEOWNERS" << 'CODEOWNERS'
@@ -79,6 +85,8 @@ Dockerfile           packaging
 *.spec               packaging
 *.AppImage           packaging
 *.md                 docs-writer
+*.ts                 architect
+*.tsx                architect
 tests/               testing-strategy
 .github/             devops
 CODEOWNERS
@@ -216,6 +224,14 @@ gather_vault_state() {
     head -5 "${retro}" 2>/dev/null
   fi
 
+  # Patterns summary (vault compaction)
+  local patterns="${project_vault}/patterns.md"
+  if [ -f "${patterns}" ]; then
+    printf '\nPatterns summary: %s (updated %s)\n' \
+      "$(basename "${patterns}")" \
+      "$(date -r "${patterns}" +%Y-%m-%d 2>/dev/null || stat -c %y "${patterns}" 2>/dev/null | cut -d' ' -f1)"
+  fi
+
   local persona="${VAULT_DIR}/universal/developer/persona.md"
   if [ -f "${persona}" ]; then
     printf '\nDeveloper persona:\n'
@@ -226,6 +242,117 @@ gather_vault_state() {
   if [ -f "${stakeholders}" ]; then
     printf '\nStakeholders:\n'
     head -10 "${stakeholders}" 2>/dev/null
+  fi
+}
+
+gather_pending_proposals() {
+  local project_name
+  project_name=$(detect_project_name)
+  local project_vault="${VAULT_DIR}/projects/${project_name}"
+  local retros_dir="${project_vault}/retros"
+
+  if [ ! -d "${retros_dir}" ]; then
+    return 0
+  fi
+
+  local retro_files
+  retro_files=$(ls -t "${retros_dir}/"*.md 2>/dev/null)
+  if [ -z "${retro_files}" ]; then
+    return 0
+  fi
+
+  local escalated=()
+  local pending=()
+  local total=0
+
+  while IFS= read -r retro_file; do
+    local date_part
+    date_part=$(basename "${retro_file}" .md)
+    # Extract unchecked items from Action Items and Carried Forward sections
+    local items
+    items=$( (
+      sed -n '/^## Action Items$/,/^## /{ /^## /d; p }' "${retro_file}" 2>/dev/null
+      sed -n '/^## Carried Forward$/,/^## /{ /^## /d; p }' "${retro_file}" 2>/dev/null
+    ) | grep '^- \[ \]' 2>/dev/null || true )
+    while IFS= read -r item; do
+      [ -z "${item}" ] && continue
+      total=$((total + 1))
+      if echo "${item}" | grep -q '\*\*ESCALATED'; then
+        escalated+=("- [${date_part}] ${item#- \[ \] }")
+      else
+        pending+=("- [${date_part}] ${item#- \[ \] }")
+      fi
+    done <<< "${items}"
+  done <<< "${retro_files}"
+
+  if [ "${total}" -eq 0 ]; then
+    return 0
+  fi
+
+  # Escalated first, then pending, cap at 5
+  local shown=0
+  local max=5
+  printf 'Pending proposals (%d total):\n' "${total}"
+  for item in "${escalated[@]}"; do
+    [ "${shown}" -ge "${max}" ] && break
+    printf '%s\n' "${item}"
+    shown=$((shown + 1))
+  done
+  for item in "${pending[@]}"; do
+    [ "${shown}" -ge "${max}" ] && break
+    printf '%s\n' "${item}"
+    shown=$((shown + 1))
+  done
+}
+
+gather_vault_index() {
+  local project_name
+  project_name=$(detect_project_name)
+  local project_vault="${VAULT_DIR}/projects/${project_name}"
+  local output=""
+
+  for subdir in decisions research architecture qa-reviews; do
+    local dir="${project_vault}/${subdir}"
+    [ ! -d "${dir}" ] && continue
+    local files
+    files=$(ls -t "${dir}/"*.md 2>/dev/null)
+    [ -z "${files}" ] && continue
+
+    local entries=()
+    local count=0
+    while IFS= read -r f; do
+      [ "${count}" -ge 10 ] && break
+      local title date_val slug
+      slug=$(basename "${f}" .md)
+      # Extract title from first H1, strip template prefix (e.g., "Decision: " or "Research: ")
+      title=$(grep -m1 '^# ' "${f}" 2>/dev/null | sed 's/^# //; s/^[A-Za-z ]*: //' || true)
+      # Extract date from frontmatter
+      date_val=$(sed -n '/^---$/,/^---$/p' "${f}" 2>/dev/null | grep '^date:' | head -1 | sed 's/date: *"\{0,1\}\([^"]*\)"\{0,1\}/\1/' || true)
+      if [ -n "${title}" ]; then
+        if [ -n "${date_val}" ]; then
+          entries+=("${title} (${date_val})")
+        else
+          entries+=("${title}")
+        fi
+      else
+        entries+=("${slug}")
+      fi
+      count=$((count + 1))
+    done <<< "${files}"
+
+    if [ "${#entries[@]}" -gt 0 ]; then
+      local label
+      # Capitalize first letter
+      label=$(echo "${subdir}" | sed 's/-/ /g; s/\b\(.\)/\u\1/g')
+      local joined
+      joined=$(printf '%s, ' "${entries[@]}")
+      joined="${joined%, }"
+      output+="${label}: ${joined}\n"
+    fi
+  done
+
+  if [ -n "${output}" ]; then
+    printf '%b' "${output}"
   fi
 }
 
@@ -257,6 +384,28 @@ build_context() {
 
   context+="## Vault State\n"
   context+="$(gather_vault_state)\n\n"
+
+  local vault_index
+  vault_index=$(gather_vault_index)
+  if [ -n "${vault_index}" ]; then
+    context+="## Vault Index\n"
+    context+="${vault_index}\n"
+  fi
+
+  context+="## CODEOWNERS\n"
+  if [ -f "${TEAM_DIR}/CODEOWNERS" ]; then
+    context+="$(grep -v '^#' "${TEAM_DIR}/CODEOWNERS" | grep -v '^$')\n"
+  else
+    context+="No CODEOWNERS file found.\n"
+  fi
+  context+="\n"
+
+  local proposals
+  proposals=$(gather_pending_proposals)
+  if [ -n "${proposals}" ]; then
+    context+="## Pending Proposals\n"
+    context+="${proposals}\n\n"
+  fi
 
   printf '%s' "${context}"
 }

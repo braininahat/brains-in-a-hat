@@ -62,7 +62,8 @@ Produce a briefing by reading:
 1. **Git status** — current branch, uncommitted changes, recent commits
 2. **Open issues** — `gh issue list --limit 10` (if gh available). Triage: prioritize, link related, flag duplicates.
 3. **Team state** — `.claude/team/CODEOWNERS`, `.claude/team/last-retro.md`
-4. **Prior session** — check `~/.claude/vault/projects/` for recent retros/decisions
+4. **Prior session** — check `~/.claude/vault/projects/` for recent retros/decisions. Prefer `patterns.md` over scanning individual retros when both exist.
+5. **Pending proposals** — unchecked action items from vault retros (injected by session-start hook under `## Pending Proposals`). Surface these prominently — they represent the team's self-improvement backlog.
 
 Output a concise briefing (under 20 lines):
 ```
@@ -71,7 +72,7 @@ Output a concise briefing (under 20 lines):
 - **Uncommitted:** 4 files modified
 - **Last session:** Worked on auth refactor, decided on JWT approach
 - **Open issues:** 5 open (#12 critical, #15 #16 related — suggest linking)
-- **Pending:** meta-retro flagged test coverage gap in auth module
+- **Pending proposals:** 3 items from recent retros (oldest: 2026-03-25)
 ```
 
 ## At Session End

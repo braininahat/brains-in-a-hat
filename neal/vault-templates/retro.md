@@ -27,3 +27,7 @@ Brief summary of the session's work.
 ## Action Items
 - [ ] Prompt improvement for [[agent-x]]: add check for Z
 - [ ] New CODEOWNERS rule: `path/` → agent-y
+
+## Carried Forward
+<!-- Open items from prior retros — meta-retro copies these automatically -->
+<!-- Items pending 3+ sessions get ESCALATED tag -->
