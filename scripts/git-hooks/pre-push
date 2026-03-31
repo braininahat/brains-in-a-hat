@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Block direct pushes to main — use branches + PRs instead.
+# Override with: ALLOW_MAIN_PUSH=1 git push ...
+set -euo pipefail
+
+if [ "${ALLOW_MAIN_PUSH:-0}" = "1" ]; then
+  exit 0
+fi
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if echo "$remote_ref" | grep -q "refs/heads/main"; then
+    echo "ERROR: Direct push to main is blocked. Use a branch + PR."
+    echo "       Override with: ALLOW_MAIN_PUSH=1 git push"
+    exit 1
+  fi
+done
+
+exit 0

@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Auto-bump plugin versions on commit.
+# Patch bump (x.x.X) on regular commits, minor bump (x.X.0) on merges.
+# Skip with: SKIP_VERSION_BUMP=1 git commit ...
+set -euo pipefail
+
+if [ "${SKIP_VERSION_BUMP:-0}" = "1" ]; then
+  exit 0
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# Determine bump type: merge → minor, regular → patch
+if [ -f "${REPO_ROOT}/.git/MERGE_HEAD" ]; then
+  BUMP="minor"
+else
+  BUMP="patch"
+fi
+
+bump_version() {
+  local file="$1"
+  local version
+  version=$(grep -oP '"version"\s*:\s*"\K[^"]+' "$file")
+
+  if [ -z "$version" ]; then
+    return
+  fi
+
+  local major minor patch
+  IFS='.' read -r major minor patch <<< "$version"
+
+  if [ "$BUMP" = "minor" ]; then
+    minor=$((minor + 1))
+    patch=0
+  else
+    patch=$((patch + 1))
+  fi
+
+  local new_version="${major}.${minor}.${patch}"
+  sed -i "s/\"version\": \"${version}\"/\"version\": \"${new_version}\"/" "$file"
+  git add "$file"
+}
+
+# Find and bump all plugin.json files
+for plugin_json in "${REPO_ROOT}"/*/.claude-plugin/plugin.json; do
+  if [ -f "$plugin_json" ]; then
+    bump_version "$plugin_json"
+  fi
+done
+
+exit 0
