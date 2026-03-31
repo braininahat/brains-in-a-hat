@@ -2,7 +2,6 @@
 
 interface ArtifactHeaderProps {
   title: string;
-  path: string;
   expanded: boolean;
   onToggleExpand: () => void;
   html: string;
@@ -10,7 +9,6 @@ interface ArtifactHeaderProps {
 
 export function ArtifactHeader({
   title,
-  path,
   expanded,
   onToggleExpand,
   html,
@@ -20,7 +18,7 @@ export function ArtifactHeader({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = path.split("/").pop() || "artifact.html";
+    a.download = `${title.toLowerCase().replace(/\s+/g, "-")}.html`;
     a.click();
     URL.revokeObjectURL(url);
   };

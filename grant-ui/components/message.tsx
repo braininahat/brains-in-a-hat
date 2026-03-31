@@ -1,5 +1,6 @@
 "use client";
 
+import Markdown from "react-markdown";
 import { parseMessage } from "@/lib/artifact-parser";
 import { Artifact } from "./artifact";
 
@@ -37,10 +38,10 @@ export function Message({ role, parts }: MessageProps) {
     <div style={styles.assistantRow}>
       {segments.map((seg, i) =>
         seg.type === "artifact" ? (
-          <Artifact key={i} path={seg.path} title={seg.title} />
+          <Artifact key={i} html={seg.html} title={seg.title} />
         ) : (
-          <div key={i} style={styles.assistantText}>
-            {seg.content}
+          <div key={i} className="assistant-prose">
+            <Markdown>{seg.content}</Markdown>
           </div>
         )
       )}
@@ -65,11 +66,5 @@ const styles: Record<string, React.CSSProperties> = {
   },
   assistantRow: {
     padding: "4px 0",
-  },
-  assistantText: {
-    color: "var(--text-primary)",
-    fontSize: "0.9375rem",
-    lineHeight: 1.6,
-    whiteSpace: "pre-wrap",
   },
 };

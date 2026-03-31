@@ -1,15 +1,17 @@
 /**
- * Detect and extract artifact markers from Grant's output.
+ * Detect and extract HTML artifacts from Grant's output.
  *
- * Grant emits markers like:
- *   [ARTIFACT: .claude/grant/auth-flow.html "Auth Flow Diagram"]
+ * Grant wraps artifacts in fenced code blocks:
+ *   ```html_artifact title="Auth Flow"
+ *   <!DOCTYPE html>...
+ *   ```
  *
- * This parser splits a message into segments: text and artifact references.
+ * This parser splits a message into segments: text and inline artifacts.
  */
 
 export interface ArtifactRef {
   type: "artifact";
-  path: string;
+  html: string;
   title: string;
 }
 
@@ -20,7 +22,7 @@ export interface TextSegment {
 
 export type MessageSegment = ArtifactRef | TextSegment;
 
-const ARTIFACT_RE = /\[ARTIFACT:\s*([^\s"]+)\s+"([^"]+)"\]/g;
+const ARTIFACT_RE = /```html_artifact\s+title="([^"]+)"\n([\s\S]*?)```/g;
 
 export function parseMessage(content: string): MessageSegment[] {
   const segments: MessageSegment[] = [];
@@ -39,8 +41,8 @@ export function parseMessage(content: string): MessageSegment[] {
 
     segments.push({
       type: "artifact",
-      path: match[1],
-      title: match[2],
+      title: match[1],
+      html: match[2].trim(),
     });
 
     lastIndex = matchStart + match[0].length;

@@ -42,10 +42,10 @@ export function Chat() {
         {messages.map((m) => (
           <Message key={m.id} role={m.role as "user" | "assistant"} parts={m.parts} />
         ))}
-        {isLoading && messages[messages.length - 1]?.role === "user" && (
+        {isLoading && (
           <div style={styles.thinking}>
             <span style={styles.thinkingDot} />
-            Thinking...
+            {status === "submitted" ? "Thinking..." : "Generating..."}
           </div>
         )}
       </div>
