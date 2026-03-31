@@ -1,6 +1,6 @@
 ---
 type: qa-review
-write-path: "~/.claude/vault/projects/{{project}}/qa-reviews/"
+write-path: "~/.brains_in_a_hat/vault/projects/{{project}}/qa-reviews/"
 project: "{{project}}"
 agents: [qa-engineer]
 date: "{{date}}"

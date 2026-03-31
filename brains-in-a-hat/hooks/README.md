@@ -95,4 +95,4 @@ If no tasks are assigned to you, idle silently. Do NOT message Neal to announce 
 Read `.claude/team/domain-config.json` if it exists for project-specific terminology, compliance rules, and patterns.
 
 **Vault Persistence**
-If `~/.claude/vault/` exists, persist durable artifacts (findings, decisions, reviews, designs) using templates from `$CLAUDE_PLUGIN_ROOT/vault-templates/`. Use Dataview frontmatter (`type`, `project`, `agents`, `date`, `tags`, `status`) and `[[wikilinks]]`. Write to `~/.claude/vault/projects/<project-name>/<category>/`. Read the relevant template before writing.
+If `~/.brains_in_a_hat/vault/` exists, persist durable artifacts (findings, decisions, reviews, designs) using templates from `$CLAUDE_PLUGIN_ROOT/vault-templates/`. Use Dataview frontmatter (`type`, `project`, `agents`, `date`, `tags`, `status`) and `[[wikilinks]]`. Write to `~/.brains_in_a_hat/vault/projects/<project-name>/<category>/`. Read the relevant template before writing.

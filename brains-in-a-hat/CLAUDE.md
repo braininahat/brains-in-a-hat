@@ -38,7 +38,7 @@ Plus tool-level hooks: `PreToolUse`, `PostToolUse`
 
 ## Vault Write Paths
 
-Agents persist durable artifacts to `~/.claude/vault/projects/<project>/<category>/`:
+Agents persist durable artifacts to `~/.brains_in_a_hat/vault/projects/<project>/<category>/`:
 
 | Category | Writers |
 |---|---|
@@ -47,12 +47,19 @@ Agents persist durable artifacts to `~/.claude/vault/projects/<project>/<categor
 | `research/` | researcher |
 | `architecture/` | architect |
 | `qa-reviews/` | qa-engineer |
+| `wiki/` (global) | researcher, any agent (explore synthesis) |
 
 All vault files use Dataview frontmatter (`type`, `project`, `agents`, `date`, `tags`, `status`) and `[[wikilinks]]`.
 
+Wiki notes live at `~/.brains_in_a_hat/vault/wiki/` (global, not project-scoped) and capture reusable knowledge from web research and reference codebase exploration.
+
+## Agent Spawning
+
+Agents are spawned on demand, not at session start. Neal tracks which agents have been spawned and reuses them via SendMessage for subsequent tasks. This reduces startup cost — only agents needed for the current work are spawned.
+
 ## Plan Mode
 
-Plan mode restricts file mutations (Write, Edit, destructive Bash). Only 7 plan-safe agents spawn:
+Plan mode restricts file mutations (Write, Edit, destructive Bash). Only 7 plan-safe agents may be spawned (on demand):
 Mason, Hunter, Drew, Sage, Tessa, Paige, Reed.
 The remaining 12 are deferred until plan mode exits.
 

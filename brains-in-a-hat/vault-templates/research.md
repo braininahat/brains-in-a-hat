@@ -1,6 +1,6 @@
 ---
 type: research
-write-path: "~/.claude/vault/projects/{{project}}/research/"
+write-path: "~/.brains_in_a_hat/vault/projects/{{project}}/research/"
 project: "{{project}}"
 agents: [researcher]
 date: "{{date}}"

@@ -19,13 +19,7 @@ Spawn the `session-manager` agent to produce a session briefing.
 
 If plan mode is active, append to the briefing:
 
-> **Plan mode active** — read-only advisory mode. Plan-safe specialists spawned:
-> - **Mason** (`architect`) — structure, boundaries, dependencies
-> - **Hunter** (`researcher`) — evidence-based investigation, comparisons
-> - **Drew** (`system-designer`) — blueprints, interfaces, tradeoffs
-> - **Sage** (`domain-expert`) — domain logic, compliance, terminology
-> - **Tessa** (`testing-strategy`) — test planning, coverage analysis
-> - **Paige** (`docs-writer`) — documentation audit, staleness detection
-> - **Reed** (`session-manager`) — briefing only, no file writes
+> **Plan mode active** — read-only advisory mode. Plan-safe agents available on demand:
+> Mason, Hunter, Drew, Sage, Tessa, Paige, Reed
 >
 > Deferred until plan mode exits: Tabitha, Porter, Sterling, Mira, Nolan, Cooper, Blaze, Chase, Quinn, Melody, Iris, Journey

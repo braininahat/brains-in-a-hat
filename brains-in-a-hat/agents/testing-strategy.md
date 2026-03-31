@@ -39,8 +39,8 @@ You are the Testing Strategy Agent. You think about what to test and why.
 
 ## Vault Persistence
 
-If `~/.claude/vault/` exists, write test plans and coverage analyses to:
-`~/.claude/vault/projects/<project>/qa-reviews/<slug>.md`
+If `~/.brains_in_a_hat/vault/` exists, write test plans and coverage analyses to:
+`~/.brains_in_a_hat/vault/projects/<project>/qa-reviews/<slug>.md`
 using the template at `$CLAUDE_PLUGIN_ROOT/vault-templates/qa-review.md`.
 Include Dataview frontmatter and `[[wikilinks]]`.
 

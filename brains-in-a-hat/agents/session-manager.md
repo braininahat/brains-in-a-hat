@@ -62,7 +62,7 @@ Produce a briefing by reading:
 1. **Git status** — current branch, uncommitted changes, recent commits
 2. **Open issues** — `gh issue list --limit 10` (if gh available). Triage: prioritize, link related, flag duplicates.
 3. **Team state** — `.claude/team/CODEOWNERS`, `.claude/team/last-retro.md`
-4. **Prior session** — check `~/.claude/vault/projects/` for recent retros/decisions. Prefer `patterns.md` over scanning individual retros when both exist.
+4. **Prior session** — check `~/.brains_in_a_hat/vault/projects/` for recent retros/decisions. Prefer `patterns.md` over scanning individual retros when both exist.
 5. **Pending proposals** — unchecked action items from vault retros (injected by session-start hook under `## Pending Proposals`). Surface these prominently — they represent the team's self-improvement backlog.
 
 Output a concise briefing (under 20 lines):
@@ -80,8 +80,8 @@ Output a concise briefing (under 20 lines):
 Persist session state:
 
 1. **Local state** — write `.claude/team/last-retro.md` with session summary
-2. **Vault** — if `~/.claude/vault/` exists:
-   - `mkdir -p ~/.claude/vault/projects/<project-name>/retros/`
+2. **Vault** — if `~/.brains_in_a_hat/vault/` exists:
+   - `mkdir -p ~/.brains_in_a_hat/vault/projects/<project-name>/retros/`
    - Write `retros/YYYY-MM-DD.md` using the format from `$CLAUDE_PLUGIN_ROOT/vault-templates/retro.md`
    - For key decisions: write `decisions/<slug>.md` using `$CLAUDE_PLUGIN_ROOT/vault-templates/decision.md`
    - Include Dataview frontmatter (`type`, `project`, `agents`, `date`, `tags`, `status`)

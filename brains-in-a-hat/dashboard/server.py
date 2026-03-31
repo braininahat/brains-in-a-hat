@@ -384,7 +384,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self._send_json(files)
 
     def _serve_vault(self):
-        """Walk ~/.claude/vault/ and return a JSON array of vault notes.
+        """Walk ~/.brains_in_a_hat/vault/ and return a JSON array of vault notes.
 
         Each entry: {"path": "<relative>", "type": "<dir-derived type>", "title": "<filename-derived>"}
         Only .md files are included.
@@ -517,7 +517,7 @@ class DashboardServer(ThreadingMixIn, HTTPServer):
         super().__init__(server_address, handler_class)
         self.agents = agents
         self.project_dir = project_dir
-        self.vault_dir = Path.home() / ".claude" / "vault"
+        self.vault_dir = Path.home() / ".brains_in_a_hat" / "vault"
         self.shutdown_event = threading.Event()
 
 
