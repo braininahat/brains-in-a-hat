@@ -1,12 +1,12 @@
 {
   "name": "grant",
-  "description": "Visual-first communicator — answers questions through interactive HTML visualizations inline in conversation",
-  "version": "0.1.0",
+  "description": "Visual-first communicator — generates interactive HTML visualizations via MCP tool. Ask any question, get a designed visual answer.",
+  "version": "0.2.0",
   "author": {
     "name": "braininahat"
   },
   "homepage": "https://github.com/braininahat/brains-in-a-hat",
   "repository": "https://github.com/braininahat/brains-in-a-hat",
   "license": "MIT",
-  "keywords": ["visualization", "generative-ui", "artifacts", "visual-communication"]
+  "keywords": ["visualization", "generative-ui", "mcp", "visual-communication"]
 }

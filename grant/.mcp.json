@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "grant": {
+      "command": "npx",
+      "args": ["ts-node", "--esm", "${CLAUDE_PLUGIN_ROOT}/server/index.ts"],
+      "cwd": "${CLAUDE_PLUGIN_ROOT}/server"
+    }
+  }
+}
