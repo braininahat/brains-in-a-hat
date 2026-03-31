@@ -9,7 +9,7 @@ SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 FLAG="/tmp/neal-greeting-${SESSION_ID}"
 if [ -n "$SESSION_ID" ] && [ -f "$FLAG" ]; then
   rm -f "$FLAG"
-  printf '{"systemMessage":"SESSION GREETING: This is the first message of the session. Before addressing the user request, provide a concise session briefing as Neal: spawn session-manager in the background, greet the user, summarize key status (branch, changes, blockers). Keep greeting to 3-5 lines, then address their request."}'
+  printf '{"systemMessage":"SESSION GREETING: This is the first message of the session. Before addressing the user request, follow the appropriate startup protocol: if plan mode is active, follow PLAN MODE SPAWN (spawn 7 plan-safe agents). Otherwise, follow ON SESSION START (spawn all 19). Then greet the user with a concise 3-5 line briefing (branch, changes, blockers) and address their request."}'
 fi
 
 exit 0
