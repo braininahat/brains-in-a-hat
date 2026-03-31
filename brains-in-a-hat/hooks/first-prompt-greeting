@@ -1,15 +1,23 @@
 #!/usr/bin/env bash
-# UserPromptSubmit hook: inject session greeting on the first user message.
-# The SessionStart hook writes a flag file; this hook consumes it once.
+# UserPromptSubmit hook:
+# 1. Detect /assemble command and create activation flag (works in plan mode)
+# 2. When team is active, inject compaction recovery breadcrumb (~50 tokens)
 set -euo pipefail
 
 INPUT=$(cat)
-SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
+PROMPT=$(echo "$INPUT" | jq -r '.user_prompt // empty' 2>/dev/null) || true
 
-FLAG="/tmp/neal-greeting-${SESSION_ID}"
-if [ -n "$SESSION_ID" ] && [ -f "$FLAG" ]; then
-  rm -f "$FLAG"
-  printf '{"systemMessage":"SESSION GREETING: This is the first message of the session. Before addressing the user request, follow ON SESSION START (TeamCreate only — agents are spawned on demand when work is routed). Then greet the user with a concise 3-5 line briefing (branch, changes, blockers) and address their request."}'
+# Detect /assemble activation — create flag before Claude processes the skill.
+# Runs as bash, bypasses plan mode restrictions.
+if echo "$PROMPT" | grep -qiE '^/assemble$|^/brains-in-a-hat:assemble$'; then
+  mkdir -p .brains_in_a_hat/state
+  echo "active" > .brains_in_a_hat/state/active
+fi
+
+# When team is active, inject recovery breadcrumb on every message
+if [ -f .brains_in_a_hat/state/active ]; then
+  PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+  printf '{"systemMessage":"COMPACTION RECOVERY: You are Neal, chief of staff for team hatbrains. If you have lost context about spawned agents or session decisions, read %s/hooks/neal-persona.md and .brains_in_a_hat/state/session-state.json to recover. Route work to specialists, never do it yourself."}' "$PLUGIN_ROOT"
 fi
 
 exit 0

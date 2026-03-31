@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# pretool-agent-check — PreToolUse[Agent] hook
+# 1. Guard: no-op if team mode is not active
+# 2. Vault check: block spawn if prior research exists in vault
+# 3. Model heuristic: advise cheaper model if task looks mechanical
+set -euo pipefail
+
+# ── Guard: team mode must be active ──────────────────────────────────
+[ -f ".brains_in_a_hat/state/active" ] || exit 0
+
+INPUT=$(cat)
+PROMPT=$(echo "$INPUT" | jq -r '.tool_input.prompt // empty' 2>/dev/null) || exit 0
+MODEL=$(echo "$INPUT" | jq -r '.tool_input.model // empty' 2>/dev/null) || true
+DESC=$(echo "$INPUT" | jq -r '.tool_input.description // empty' 2>/dev/null) || true
+
+VAULT_DIR="${HOME}/.brains_in_a_hat/vault"
+PROJECT=$(basename "$(pwd)")
+
+# ── Vault Check (project-scoped + global wiki) ──────────────────────
+
+vault_check() {
+  [ -d "$VAULT_DIR" ] || return 0
+  [ -n "$PROMPT" ] || return 0
+
+  # Stopwords: common English + agent prompt boilerplate + generic technical terms
+  local stopwords="the a an is are was were be been being have has had do does did will would shall should may might can could of in to for on with at by from as into through during before after above below between your you this that these those it its and or but not no nor so yet also very just only even still already when what which who whom how where why each every all any few more most other some such than too much many well here there then now team hatbrains agent role task rules findings neal sendmessage spawn spawned message report completed work done active mode plan read write edit using use used make keep send via research code data model system project file feature config class function method check based type name output input new should need current state"
+
+  # Extract top 8 keywords from prompt (frequency-ranked, non-stopwords)
+  local keywords
+  keywords=$(echo "$PROMPT" | tr '[:upper:]' '[:lower:]' | tr -cs '[:alpha:]' '\n' | \
+    grep -vxFf <(printf '%s\n' $stopwords) 2>/dev/null | \
+    sort | uniq -c | sort -rn | awk '{print $2}' | head -8) || true
+
+  [ -n "$keywords" ] || return 0
+
+  # Build OR pattern for fast first-pass
+  local pattern
+  pattern=$(echo "$keywords" | tr '\n' '|' | sed 's/|$//')
+  [ -n "$pattern" ] || return 0
+
+  # Search current project vault + global wiki only (not other projects)
+  local search_dirs=()
+  for d in "$VAULT_DIR/wiki" \
+           "$VAULT_DIR/projects/$PROJECT/research" \
+           "$VAULT_DIR/projects/$PROJECT/decisions" \
+           "$VAULT_DIR/projects/$PROJECT/architecture"; do
+    [ -d "$d" ] && search_dirs+=("$d")
+  done
+  [ "${#search_dirs[@]}" -gt 0 ] || return 0
+
+  # First pass: find files matching any keyword
+  local candidates
+  candidates=$(grep -rl -iE "$pattern" "${search_dirs[@]}" 2>/dev/null) || true
+  [ -n "$candidates" ] || return 0
+
+  # Second pass: require 3+ distinct keyword matches per file
+  local matched_files=""
+  while IFS= read -r file; do
+    [ -f "$file" ] || continue
+    local hits=0
+    for kw in $keywords; do
+      grep -qil "$kw" "$file" 2>/dev/null && hits=$((hits + 1))
+    done
+    [ "$hits" -ge 3 ] && matched_files="${matched_files}${file}"$'\n'
+  done <<< "$candidates"
+
+  matched_files=$(echo "$matched_files" | sed '/^$/d')
+  if [ -n "$matched_files" ]; then
+    local file_list
+    file_list=$(echo "$matched_files" | head -5 | tr '\n' ', ' | sed 's/, $//')
+    printf '{"decision":"block","reason":"Prior research found in vault. Read these first, then retry or skip spawn if the answer is there: %s"}' "$file_list"
+    exit 0
+  fi
+}
+
+# ── Model Tier Heuristic ─────────────────────────────────────────────
+
+model_check() {
+  local text
+  text=$(echo "$DESC $PROMPT" | tr '[:upper:]' '[:lower:]')
+  [ -n "$text" ] || return 0
+
+  # Count keyword signals per tier
+  local haiku_score=0 sonnet_score=0 opus_score=0
+  local haiku_kws="" sonnet_kws=""
+
+  for sig in check verify list grep find exists lookup count; do
+    if echo "$text" | grep -qw "$sig" 2>/dev/null; then
+      haiku_score=$((haiku_score + 1))
+      haiku_kws="$haiku_kws $sig"
+    fi
+  done
+
+  for sig in review write update test document summarize report audit; do
+    if echo "$text" | grep -qw "$sig" 2>/dev/null; then
+      sonnet_score=$((sonnet_score + 1))
+      sonnet_kws="$sonnet_kws $sig"
+    fi
+  done
+
+  for sig in design investigate compare analyze architect diagnose debug tradeoff evaluate; do
+    echo "$text" | grep -qw "$sig" 2>/dev/null && opus_score=$((opus_score + 1))
+  done
+
+  # Determine suggested tier (highest score wins; ties go cheaper)
+  local suggested="" matched_kws=""
+  if [ "$haiku_score" -gt "$sonnet_score" ] && [ "$haiku_score" -gt "$opus_score" ] && [ "$haiku_score" -gt 0 ]; then
+    suggested="haiku"; matched_kws=$(echo "$haiku_kws" | xargs)
+  elif [ "$sonnet_score" -gt "$opus_score" ] && [ "$sonnet_score" -gt 0 ]; then
+    suggested="sonnet"; matched_kws=$(echo "$sonnet_kws" | xargs)
+  fi
+  # If opus wins or no clear signal, no advisory needed
+  [ -n "$suggested" ] || return 0
+
+  # Map model to cost level (default=opus=3 when unspecified)
+  local model_cost=3
+  case "${MODEL:-opus}" in
+    haiku*) model_cost=1 ;; sonnet*) model_cost=2 ;; opus*) model_cost=3 ;;
+  esac
+
+  local suggested_cost=0
+  case "$suggested" in
+    haiku) suggested_cost=1 ;; sonnet) suggested_cost=2 ;;
+  esac
+
+  # Only advise if model is more expensive than suggested
+  if [ "$model_cost" -gt "$suggested_cost" ] && [ "$suggested_cost" -gt 0 ]; then
+    local actual="${MODEL:-opus(default)}"
+    printf '{"hookSpecificOutput":{"additionalContext":"MODEL HINT: This task looks %s-tier (keywords: %s). Consider model=\\\"%s\\\" instead of %s to save tokens."}}' \
+      "$suggested" "$matched_kws" "$suggested" "$actual"
+    exit 0
+  fi
+}
+
+# ── Main ─────────────────────────────────────────────────────────────
+
+vault_check
+model_check
+# No vault match, no model mismatch — allow silently
