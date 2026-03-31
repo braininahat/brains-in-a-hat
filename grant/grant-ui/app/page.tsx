@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import Markdown from "react-markdown";
 
 interface Artifact {
   title: string;
@@ -23,6 +24,8 @@ export default function Home() {
   const [response, setResponse] = useState("");
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [iframeHeight, setIframeHeight] = useState(520);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -92,7 +95,7 @@ export default function Home() {
         )}
 
         {/* Text before artifact (both during and after streaming) */}
-        {(before || streamingBefore) && <p style={styles.text}>{before || streamingBefore}</p>}
+        {(before || streamingBefore) && <div className="prose"><Markdown>{before || streamingBefore}</Markdown></div>}
 
         {/* Loading placeholder while artifact is being generated */}
         {loading && hasArtifactBlock && !artifactComplete && (
@@ -127,15 +130,25 @@ export default function Home() {
               </div>
             </div>
             <iframe
+              ref={iframeRef}
               srcDoc={artifact.html}
-              sandbox="allow-scripts"
-              style={expanded ? styles.iframeExpanded : styles.iframe}
+              sandbox="allow-scripts allow-same-origin"
+              style={expanded ? styles.iframeExpanded : { ...styles.iframe, height: `${iframeHeight}px` }}
               title={artifact.title}
+              onLoad={() => {
+                try {
+                  const doc = iframeRef.current?.contentDocument;
+                  if (doc) {
+                    const h = doc.documentElement.scrollHeight;
+                    if (h > 100) setIframeHeight(Math.min(h + 20, 1200));
+                  }
+                } catch { /* cross-origin fallback */ }
+              }}
             />
           </div>
         )}
 
-        {after && <p style={styles.text}>{after}</p>}
+        {after && <div className="prose"><Markdown>{after}</Markdown></div>}
 
         {/* Initial thinking state (before any content) */}
         {loading && !response && (
@@ -147,7 +160,7 @@ export default function Home() {
 
         {/* Text-only response still streaming */}
         {loading && response && !hasArtifactBlock && (
-          <p style={styles.text}>{response}</p>
+          <div className="prose"><Markdown>{response}</Markdown></div>
         )}
       </div>
 
