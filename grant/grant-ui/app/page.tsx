@@ -1,28 +1,78 @@
 "use client";
 
-import { useState } from "react";
-import {
-  useUIStream,
-  Renderer,
-  StateProvider,
-  VisibilityProvider,
-  ActionProvider,
-  ValidationProvider,
-} from "@json-render/react";
-import { registry } from "@/lib/registry";
+import { useState, useRef, useEffect } from "react";
+
+interface Artifact {
+  title: string;
+  html: string;
+}
+
+function parseArtifacts(text: string): { before: string; artifact: Artifact | null; after: string } {
+  const match = text.match(/```html_artifact\s+title="([^"]+)"\n([\s\S]*?)```/);
+  if (!match) return { before: text, artifact: null, after: "" };
+  const idx = match.index!;
+  return {
+    before: text.slice(0, idx).trim(),
+    artifact: { title: match[1], html: match[2].trim() },
+    after: text.slice(idx + match[0].length).trim(),
+  };
+}
 
 export default function Home() {
   const [input, setInput] = useState("");
-  const { spec, isStreaming, send, clear } = useUIStream({
-    api: "/api/generate",
-  });
+  const [response, setResponse] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [response]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isStreaming) return;
-    send(input.trim());
+    if (!input.trim() || loading) return;
+    const prompt = input.trim();
     setInput("");
+    setResponse("");
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) return;
+
+      let full = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        full += decoder.decode(value, { stream: true });
+        setResponse(full);
+      }
+    } finally {
+      setLoading(false);
+    }
   };
+
+  // Only parse artifacts when done streaming — don't show raw HTML mid-stream
+  const hasArtifactBlock = response.includes("```html_artifact");
+  const artifactComplete = hasArtifactBlock && response.includes("```\n") && response.lastIndexOf("```") > response.indexOf("```html_artifact") + 10;
+  const { before, artifact, after } = artifactComplete ? parseArtifacts(response) : { before: "", artifact: null, after: "" };
+
+  // Show text before the artifact block while streaming (but not the HTML itself)
+  const streamingBefore = !artifactComplete && hasArtifactBlock
+    ? response.slice(0, response.indexOf("```html_artifact")).trim()
+    : (!hasArtifactBlock && !loading ? response : (!hasArtifactBlock ? "" : ""));
+
+  // Extract title from partial stream
+  const partialTitleMatch = response.match(/```html_artifact\s+title="([^"]+)"/);
+  const partialTitle = partialTitleMatch?.[1];
 
   return (
     <main style={styles.main}>
@@ -31,63 +81,91 @@ export default function Home() {
         <p style={styles.subtitle}>show, don&apos;t tell</p>
       </header>
 
-      <div style={styles.content}>
-        {!spec && !isStreaming && (
+      <div ref={scrollRef} style={styles.content}>
+        {!response && !loading && (
           <div style={styles.empty}>
             <p style={styles.emptyTitle}>Ask me anything.</p>
             <p style={styles.emptyHint}>
-              I&apos;ll answer with interactive visualizations — comparisons,
-              architecture diagrams, timelines, dashboards.
+              I&apos;ll answer with publication-quality figures — diagrams, architecture maps, concept explanations.
             </p>
           </div>
         )}
 
-        {(spec || isStreaming) && (
-          <StateProvider initialState={{}}>
-            <VisibilityProvider>
-              <ActionProvider handlers={{}}>
-                <ValidationProvider>
-                  <div style={styles.visualization}>
-                    <Renderer
-                      spec={spec}
-                      registry={registry}
-                      loading={isStreaming}
-                    />
-                  </div>
-                </ValidationProvider>
-              </ActionProvider>
-            </VisibilityProvider>
-          </StateProvider>
+        {/* Text before artifact (both during and after streaming) */}
+        {(before || streamingBefore) && <p style={styles.text}>{before || streamingBefore}</p>}
+
+        {/* Loading placeholder while artifact is being generated */}
+        {loading && hasArtifactBlock && !artifactComplete && (
+          <div style={styles.artifact}>
+            <div style={styles.artifactHeader}>
+              <span style={styles.artifactTitle}>{partialTitle || "Generating..."}</span>
+            </div>
+            <div style={styles.placeholder}>
+              <div style={styles.spinner} />
+              <span style={styles.placeholderText}>Creating figure...</span>
+            </div>
+          </div>
         )}
 
-        {isStreaming && (
-          <div style={styles.streaming}>
-            <span style={styles.dot} />
-            Generating...
+        {/* Completed artifact */}
+        {artifact && (
+          <div style={expanded ? styles.artifactExpanded : styles.artifact}>
+            <div style={styles.artifactHeader}>
+              <span style={styles.artifactTitle}>{artifact.title}</span>
+              <div style={styles.artifactActions}>
+                <button onClick={() => navigator.clipboard.writeText(artifact.html)} style={styles.btn}>Copy</button>
+                <button onClick={() => {
+                  const b = new Blob([artifact.html], { type: "text/html" });
+                  const a = document.createElement("a");
+                  a.href = URL.createObjectURL(b);
+                  a.download = `${artifact.title.toLowerCase().replace(/\s+/g, "-")}.html`;
+                  a.click();
+                }} style={styles.btn}>Save</button>
+                <button onClick={() => setExpanded(!expanded)} style={styles.btn}>
+                  {expanded ? "Collapse" : "Expand"}
+                </button>
+              </div>
+            </div>
+            <iframe
+              srcDoc={artifact.html}
+              sandbox="allow-scripts"
+              style={expanded ? styles.iframeExpanded : styles.iframe}
+              title={artifact.title}
+            />
           </div>
+        )}
+
+        {after && <p style={styles.text}>{after}</p>}
+
+        {/* Initial thinking state (before any content) */}
+        {loading && !response && (
+          <div style={styles.loading}>
+            <span style={styles.dot} />
+            Thinking...
+          </div>
+        )}
+
+        {/* Text-only response still streaming */}
+        {loading && response && !hasArtifactBlock && (
+          <p style={styles.text}>{response}</p>
         )}
       </div>
 
       <form onSubmit={handleSubmit} style={styles.form}>
-        {spec && !isStreaming && (
-          <button type="button" onClick={clear} style={styles.clearBtn}>
-            Clear
-          </button>
+        {response && !loading && (
+          <button type="button" onClick={() => setResponse("")} style={styles.clearBtn}>Clear</button>
         )}
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Compare React vs Vue vs Svelte"
+          placeholder="How does JEPA work?"
           style={styles.input}
           autoFocus
         />
         <button
           type="submit"
-          disabled={isStreaming || !input.trim()}
-          style={{
-            ...styles.send,
-            opacity: isStreaming || !input.trim() ? 0.3 : 1,
-          }}
+          disabled={loading || !input.trim()}
+          style={{ ...styles.send, opacity: loading || !input.trim() ? 0.3 : 1 }}
         >
           Send
         </button>
@@ -97,106 +175,30 @@ export default function Home() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  main: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100vh",
-    maxWidth: "900px",
-    margin: "0 auto",
-    padding: "0 24px",
-  },
-  header: {
-    padding: "24px 0 16px",
-    borderBottom: "1px solid var(--border)",
-    flexShrink: 0,
-  },
-  title: {
-    fontSize: "1.125rem",
-    fontWeight: 500,
-    color: "var(--text)",
-    letterSpacing: "-0.01em",
-  },
-  subtitle: {
-    fontSize: "0.8125rem",
-    color: "var(--text-muted)",
-    marginTop: "4px",
-  },
-  content: {
-    flex: 1,
-    overflowY: "auto",
-    padding: "24px 0",
-  },
-  empty: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
-    gap: "8px",
-  },
-  emptyTitle: {
-    fontSize: "1.25rem",
-    fontWeight: 500,
-    color: "var(--text-dim)",
-  },
-  emptyHint: {
-    fontSize: "0.875rem",
-    color: "var(--text-muted)",
-    maxWidth: "360px",
-    textAlign: "center",
-    lineHeight: 1.5,
-  },
-  visualization: {
-    minHeight: "200px",
-  },
-  streaming: {
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-    color: "var(--text-muted)",
-    fontSize: "0.875rem",
-    padding: "16px 0",
-  },
-  dot: {
-    width: "6px",
-    height: "6px",
-    borderRadius: "50%",
-    background: "var(--accent)",
-  },
-  form: {
-    display: "flex",
-    gap: "8px",
-    padding: "16px 0 24px",
-    borderTop: "1px solid var(--border)",
-    flexShrink: 0,
-  },
-  input: {
-    flex: 1,
-    padding: "12px 16px",
-    fontSize: "0.9375rem",
-    background: "var(--surface)",
-    border: "1px solid var(--border)",
-    borderRadius: "8px",
-    color: "var(--text)",
-    outline: "none",
-  },
-  send: {
-    padding: "12px 20px",
-    fontSize: "0.875rem",
-    fontWeight: 500,
-    background: "var(--accent)",
-    color: "var(--bg)",
-    border: "none",
-    borderRadius: "8px",
-    cursor: "pointer",
-  },
-  clearBtn: {
-    padding: "12px 16px",
-    fontSize: "0.875rem",
-    color: "var(--text-dim)",
-    background: "transparent",
-    border: "1px solid var(--border)",
-    borderRadius: "8px",
-    cursor: "pointer",
-  },
+  main: { display: "flex", flexDirection: "column", height: "100vh", maxWidth: "960px", margin: "0 auto", padding: "0 24px" },
+  header: { padding: "24px 0 16px", borderBottom: "1px solid #e8e4dc", flexShrink: 0 },
+  title: { fontSize: "1.125rem", fontWeight: 500, color: "#2d2d2d", letterSpacing: "-0.01em" },
+  subtitle: { fontSize: "0.8125rem", color: "#999", marginTop: "4px" },
+  content: { flex: 1, overflowY: "auto", padding: "24px 0" },
+  empty: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: "8px" },
+  emptyTitle: { fontSize: "1.25rem", fontWeight: 500, color: "#666" },
+  emptyHint: { fontSize: "0.875rem", color: "#999", maxWidth: "380px", textAlign: "center", lineHeight: 1.5 },
+  text: { fontSize: "0.9375rem", lineHeight: 1.6, color: "#2d2d2d", margin: "12px 0" },
+  artifact: { border: "1px solid #e8e4dc", borderRadius: "8px", overflow: "hidden", margin: "16px 0", background: "#fff" },
+  artifactExpanded: { position: "fixed", inset: "16px", zIndex: 100, border: "1px solid #e8e4dc", borderRadius: "8px", overflow: "hidden", background: "#fff", display: "flex", flexDirection: "column" },
+  artifactHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", borderBottom: "1px solid #e8e4dc", background: "#fafaf8" },
+  artifactTitle: { fontSize: "0.8125rem", fontWeight: 500, color: "#8b7355" },
+  artifactActions: { display: "flex", gap: "4px" },
+  btn: { padding: "4px 10px", fontSize: "0.75rem", color: "#999", background: "transparent", border: "1px solid #e8e4dc", borderRadius: "4px", cursor: "pointer" },
+  iframe: { width: "100%", height: "520px", border: "none", background: "#fafaf8" },
+  iframeExpanded: { width: "100%", flex: 1, border: "none", background: "#fafaf8" },
+  placeholder: { display: "flex", flexDirection: "column" as const, alignItems: "center", justifyContent: "center", height: "320px", gap: "16px", background: "#fafaf8" },
+  spinner: { width: "24px", height: "24px", border: "2px solid #e8e4dc", borderTopColor: "#c9a87c", borderRadius: "50%", animation: "spin 0.8s linear infinite" },
+  placeholderText: { fontSize: "0.8125rem", color: "#999" },
+  loading: { display: "flex", alignItems: "center", gap: "8px", color: "#999", fontSize: "0.875rem", padding: "16px 0" },
+  dot: { width: "6px", height: "6px", borderRadius: "50%", background: "#c9a87c", animation: "pulse 1.5s ease-in-out infinite" },
+  form: { display: "flex", gap: "8px", padding: "16px 0 24px", borderTop: "1px solid #e8e4dc", flexShrink: 0 },
+  input: { flex: 1, padding: "12px 16px", fontSize: "0.9375rem", background: "#fafaf8", border: "1px solid #e8e4dc", borderRadius: "8px", color: "#2d2d2d", outline: "none" },
+  send: { padding: "12px 20px", fontSize: "0.875rem", fontWeight: 500, background: "#8b7355", color: "#fff", border: "none", borderRadius: "8px", cursor: "pointer" },
+  clearBtn: { padding: "12px 16px", fontSize: "0.875rem", color: "#999", background: "transparent", border: "1px solid #e8e4dc", borderRadius: "8px", cursor: "pointer" },
 };
