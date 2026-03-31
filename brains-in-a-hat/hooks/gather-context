@@ -1,0 +1,284 @@
+#!/usr/bin/env bash
+#
+# gather-context — Collects session context for the brains-in-a-hat plugin
+#
+# Extracted from session-start so /assemble skill can reuse it.
+# Outputs plain text context block to stdout.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+VAULT_DIR="${HOME}/.brains_in_a_hat/vault"
+STATE_DIR=".brains_in_a_hat/state"
+
+# ── Project detection ─────────────────────────────────────────────────
+
+detect_project_name() {
+  local name
+  name=$(gh repo view --json name -q '.name' 2>/dev/null || true)
+  if [ -n "${name}" ]; then
+    printf '%s' "${name}"
+    return
+  fi
+  basename "$(pwd)"
+}
+
+# ── PM tier detection ─────────────────────────────────────────────────
+
+detect_pm_tier() {
+  # Check cache first
+  if [ -f "${STATE_DIR}/pm-tier" ]; then
+    cat "${STATE_DIR}/pm-tier"
+    return
+  fi
+  local owner
+  owner=$(gh repo view --json owner -q '.owner.login' 2>/dev/null || true)
+  if [ -n "${owner}" ]; then
+    local project_count
+    project_count=$(gh project list --owner "${owner}" --format json --limit 1 2>/dev/null | jq '.projects | length' 2>/dev/null || echo "0")
+    if [ "${project_count}" -gt 0 ] 2>/dev/null; then
+      printf 'gh-project'
+      return
+    fi
+  fi
+  if gh issue list --limit 1 &>/dev/null 2>&1; then
+    printf 'gh-issue'
+    return
+  fi
+  printf 'local'
+}
+
+# ── Data gathering ────────────────────────────────────────────────────
+
+gather_git_data() {
+  local branch dirty recent_commits
+  branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "not a git repo")
+  dirty=$(git status --short 2>/dev/null || echo "")
+  recent_commits=$(git log --oneline -5 2>/dev/null || echo "no commits")
+
+  local ahead_behind=""
+  if git rev-parse --abbrev-ref '@{upstream}' &>/dev/null; then
+    ahead_behind=$(git rev-list --left-right --count '@{upstream}...HEAD' 2>/dev/null | awk '{print "behind:"$1" ahead:"$2}')
+  fi
+
+  printf 'Branch: %s\n' "${branch}"
+  if [ -n "${ahead_behind}" ]; then
+    printf 'Remote: %s\n' "${ahead_behind}"
+  fi
+  if [ -n "${dirty}" ]; then
+    printf 'Dirty files:\n%s\n' "${dirty}"
+  else
+    printf 'Working tree: clean\n'
+  fi
+  printf 'Recent commits:\n%s\n' "${recent_commits}"
+}
+
+gather_issues() {
+  local pm_tier="$1"
+  case "${pm_tier}" in
+    gh-project)
+      local owner proj_num
+      owner=$(gh repo view --json owner -q '.owner.login' 2>/dev/null || true)
+      proj_num=$(gh project list --owner "${owner}" --format json --limit 1 2>/dev/null | jq -r '.projects[0].number' 2>/dev/null || true)
+      if [ -n "${proj_num}" ] && [ "${proj_num}" != "null" ]; then
+        gh project item-list "${proj_num}" --owner "${owner}" --limit 10 --format json 2>/dev/null | jq -r '.items[] | "- [\(.status)] \(.title)"' 2>/dev/null || echo "Could not read project items"
+      else
+        echo "No project found"
+      fi
+      ;;
+    gh-issue)
+      gh issue list --limit 10 --json number,title,labels --jq '.[] | "- #\(.number): \(.title)"' 2>/dev/null || echo "Could not read issues"
+      ;;
+    local)
+      local project_name
+      project_name=$(detect_project_name)
+      local backlog="${VAULT_DIR}/projects/${project_name}/backlog.md"
+      if [ -f "${backlog}" ]; then
+        head -20 "${backlog}"
+      else
+        echo "No local backlog yet"
+      fi
+      ;;
+  esac
+}
+
+gather_memory() {
+  local encoded_path
+  encoded_path=$(pwd | sed 's|/|-|g')
+  local memory_dir="${HOME}/.claude/projects/${encoded_path}/memory/MEMORY.md"
+  if [ -f "${memory_dir}" ]; then
+    cat "${memory_dir}" 2>/dev/null || echo "No memory"
+  else
+    local name
+    name=$(detect_project_name)
+    local found
+    found=$(find "${HOME}/.claude/projects/" -maxdepth 2 -name "MEMORY.md" -path "*${name}*" 2>/dev/null | head -1)
+    if [ -n "${found}" ]; then
+      cat "${found}" 2>/dev/null || echo "No memory"
+    else
+      echo "No project memory found"
+    fi
+  fi
+}
+
+gather_vault_state() {
+  local project_name
+  project_name=$(detect_project_name)
+  local project_vault="${VAULT_DIR}/projects/${project_name}"
+
+  local retro
+  retro=$(ls -t "${project_vault}/retros/"*.md 2>/dev/null | head -1)
+  if [ -n "${retro}" ]; then
+    printf 'Last retro: %s\n' "$(basename "${retro}")"
+    head -5 "${retro}" 2>/dev/null
+  fi
+
+  local patterns="${project_vault}/patterns.md"
+  if [ -f "${patterns}" ]; then
+    printf '\nPatterns summary: %s (updated %s)\n' \
+      "$(basename "${patterns}")" \
+      "$(date -r "${patterns}" +%Y-%m-%d 2>/dev/null || stat -c %y "${patterns}" 2>/dev/null | cut -d' ' -f1)"
+  fi
+}
+
+gather_pending_proposals() {
+  local project_name
+  project_name=$(detect_project_name)
+  local project_vault="${VAULT_DIR}/projects/${project_name}"
+  local retros_dir="${project_vault}/retros"
+
+  [ -d "${retros_dir}" ] || return 0
+
+  local retro_files
+  retro_files=$(ls -t "${retros_dir}/"*.md 2>/dev/null)
+  [ -n "${retro_files}" ] || return 0
+
+  local escalated=()
+  local pending=()
+  local total=0
+
+  while IFS= read -r retro_file; do
+    local date_part
+    date_part=$(basename "${retro_file}" .md)
+    local items
+    items=$( (
+      sed -n '/^## Action Items$/,/^## /{ /^## /d; p }' "${retro_file}" 2>/dev/null
+      sed -n '/^## Carried Forward$/,/^## /{ /^## /d; p }' "${retro_file}" 2>/dev/null
+    ) | grep '^- \[ \]' 2>/dev/null || true )
+    while IFS= read -r item; do
+      [ -z "${item}" ] && continue
+      total=$((total + 1))
+      if echo "${item}" | grep -q '\*\*ESCALATED'; then
+        escalated+=("- [${date_part}] ${item#- \[ \] }")
+      else
+        pending+=("- [${date_part}] ${item#- \[ \] }")
+      fi
+    done <<< "${items}"
+  done <<< "${retro_files}"
+
+  [ "${total}" -eq 0 ] && return 0
+
+  local shown=0 max=5
+  printf 'Pending proposals (%d total):\n' "${total}"
+  for item in "${escalated[@]}"; do
+    [ "${shown}" -ge "${max}" ] && break
+    printf '%s\n' "${item}"
+    shown=$((shown + 1))
+  done
+  for item in "${pending[@]}"; do
+    [ "${shown}" -ge "${max}" ] && break
+    printf '%s\n' "${item}"
+    shown=$((shown + 1))
+  done
+}
+
+gather_vault_index() {
+  local project_name
+  project_name=$(detect_project_name)
+  local project_vault="${VAULT_DIR}/projects/${project_name}"
+  local output=""
+
+  for subdir in decisions research architecture qa-reviews; do
+    local dir="${project_vault}/${subdir}"
+    [ ! -d "${dir}" ] && continue
+    local files
+    files=$(ls -t "${dir}/"*.md 2>/dev/null)
+    [ -z "${files}" ] && continue
+
+    local entries=()
+    local count=0
+    while IFS= read -r f; do
+      [ "${count}" -ge 10 ] && break
+      local title slug
+      slug=$(basename "${f}" .md)
+      title=$(grep -m1 '^# ' "${f}" 2>/dev/null | sed 's/^# //; s/^[A-Za-z ]*: //' || true)
+      if [ -n "${title}" ]; then
+        entries+=("${title}")
+      else
+        entries+=("${slug}")
+      fi
+      count=$((count + 1))
+    done <<< "${files}"
+
+    if [ "${#entries[@]}" -gt 0 ]; then
+      local label
+      label=$(echo "${subdir}" | sed 's/-/ /g; s/\b\(.\)/\u\1/g')
+      local joined
+      joined=$(printf '%s, ' "${entries[@]}")
+      joined="${joined%, }"
+      output+="${label}: ${joined}\n"
+    fi
+  done
+
+  [ -n "${output}" ] && printf '%b' "${output}"
+}
+
+# ── Build full context block ─────────────────────────────────────────
+
+build_context() {
+  local project_name pm_tier
+  project_name=$(detect_project_name)
+  pm_tier=$(detect_pm_tier)
+
+  # Cache PM tier
+  mkdir -p "${STATE_DIR}"
+  printf '%s' "${pm_tier}" > "${STATE_DIR}/pm-tier"
+
+  local context=""
+  context+="## Project: ${project_name}\n"
+  context+="PM tier: ${pm_tier}\n"
+  context+="Vault: ~/.brains_in_a_hat/vault/projects/${project_name}/\n\n"
+
+  context+="## Git State\n$(gather_git_data)\n\n"
+  context+="## Backlog (${pm_tier})\n$(gather_issues "${pm_tier}")\n\n"
+  context+="## Memory\n$(gather_memory)\n\n"
+  context+="## Vault State\n$(gather_vault_state)\n\n"
+
+  local vault_index
+  vault_index=$(gather_vault_index)
+  if [ -n "${vault_index}" ]; then
+    context+="## Vault Index\n${vault_index}\n"
+  fi
+
+  context+="## CODEOWNERS\n"
+  if [ -f ".brains_in_a_hat/CODEOWNERS" ]; then
+    context+="$(grep -v '^#' ".brains_in_a_hat/CODEOWNERS" | grep -v '^$')\n"
+  else
+    context+="No CODEOWNERS file found.\n"
+  fi
+  context+="\n"
+
+  local proposals
+  proposals=$(gather_pending_proposals)
+  if [ -n "${proposals}" ]; then
+    context+="## Pending Proposals\n${proposals}\n\n"
+  fi
+
+  printf '%b' "${context}"
+}
+
+# When run directly (not sourced), output context
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  build_context
+fi

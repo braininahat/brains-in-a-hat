@@ -3,61 +3,60 @@
 # session-start — SessionStart hook for the brains-in-a-hat plugin
 #
 # Purpose:
-#   Runs once at the start of every Claude Code session. Bootstraps the
-#   vault/team directory structure on first use, starts the global dashboard
-#   server if it is not already running, and assembles a rich context block
-#   (persona + live project state) that is injected into Claude's system
-#   prompt for the session.
+#   Bootstrap-only. Creates directory structure, starts dashboard,
+#   migrates old state. Does NOT inject persona or gather context —
+#   that's handled by /assemble when the user opts in.
 #
-# Steps:
-#   1. Start dashboard server (non-blocking, idempotent)
-#   2. Bootstrap vault dirs, CODEOWNERS, and Obsidian config (first-run)
-#   3. Write a greeting flag consumed by the UserPromptSubmit hook
-#   4. Append a session record to ~/.claude/team/active-sessions.jsonl
-#   5. Load Neal persona from hooks/neal-persona.md
-#   6. Gather dynamic context: git state, backlog, memory, vault state,
-#      vault index, CODEOWNERS, and pending retro proposals
-#   7. Emit a JSON object with hookEventName + additionalContext for Claude
-#
-# Inputs  (stdin): JSON hook payload — used to extract session_id
-# Outputs (stdout): JSON { hookSpecificOutput: { hookEventName, additionalContext } }
+# Outputs: empty (no persona injection)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 VAULT_DIR="${HOME}/.brains_in_a_hat/vault"
-TEAM_DIR=".claude/team"
+STATE_DIR=".brains_in_a_hat/state"
+PROJECT_CONFIG=".brains_in_a_hat"
+
+# ── Project detection ─────────────────────────────────────────────────
+
+detect_project_name() {
+  local name
+  name=$(gh repo view --json name -q '.name' 2>/dev/null || true)
+  if [ -n "${name}" ]; then
+    printf '%s' "${name}"
+    return
+  fi
+  basename "$(pwd)"
+}
 
 # ── Dashboard auto-start ─────────────────────────────────────────────
 
 dashboard_start() {
-  mkdir -p "${TEAM_DIR}"
+  mkdir -p "${STATE_DIR}"
   if ! pgrep -f 'dashboard/server.py' > /dev/null 2>&1; then
-    # Prefer uv, fall back to python3
     local py_cmd=""
     if command -v uv &>/dev/null; then
       py_cmd="uv run python"
     elif command -v python3 &>/dev/null; then
       py_cmd="python3"
     else
-      return 0  # No python available, skip dashboard
+      return 0
     fi
     nohup ${py_cmd} "${PLUGIN_ROOT}/dashboard/server.py" \
-      --project-dir "$(pwd)" > "${TEAM_DIR}/dashboard.log" 2>&1 &
+      --project-dir "$(pwd)" > "${STATE_DIR}/dashboard.log" 2>&1 &
     sleep 1
     local url
-    url=$(grep -oP 'http://[^ ]+' "${TEAM_DIR}/dashboard.log" 2>/dev/null | head -1)
+    url=$(grep -oP 'http://[^ ]+' "${STATE_DIR}/dashboard.log" 2>/dev/null | head -1)
     if [ -n "${url}" ]; then
       (xdg-open "${url}" 2>/dev/null || open "${url}" 2>/dev/null) &
     fi
   fi
 }
 
-# ── First-run auto-setup ──────────────────────────────────────────────
+# ── Directory bootstrap ──────────────────────────────────────────────
 
-first_run_setup() {
-  # Vault structure
+bootstrap_dirs() {
+  # Global vault structure
   if [ ! -d "${VAULT_DIR}" ]; then
     mkdir -p "${VAULT_DIR}/universal/developer"
     mkdir -p "${VAULT_DIR}/universal/patterns"
@@ -65,13 +64,11 @@ first_run_setup() {
     mkdir -p "${VAULT_DIR}/universal/content"
     mkdir -p "${VAULT_DIR}/projects"
   fi
-
   mkdir -p "${VAULT_DIR}/wiki"
 
-  # Project team directory
-  if [ ! -d "${TEAM_DIR}" ]; then
-    mkdir -p "${TEAM_DIR}"
-  fi
+  # Project-local plugin dirs
+  mkdir -p "${PROJECT_CONFIG}"
+  mkdir -p "${STATE_DIR}"
 
   # Project vault subdirectory
   local project_name
@@ -90,9 +87,9 @@ first_run_setup() {
     cp "${PLUGIN_ROOT}/vault-templates/dashboard.md" "${dashboard_note}" 2>/dev/null || true
   fi
 
-  # CODEOWNERS (if missing)
-  if [ ! -f "${TEAM_DIR}/CODEOWNERS" ]; then
-    cat > "${TEAM_DIR}/CODEOWNERS" << 'CODEOWNERS'
+  # CODEOWNERS (project-local, committable)
+  if [ ! -f "${PROJECT_CONFIG}/CODEOWNERS" ]; then
+    cat > "${PROJECT_CONFIG}/CODEOWNERS" << 'CODEOWNERS'
 # brains-in-a-hat agent ownership mappings
 # Format: <glob-pattern>  <agent-name>
 # meta-retro updates this file during retrospectives.
@@ -114,7 +111,14 @@ tests/               testing-strategy
 CODEOWNERS
   fi
 
-  # Obsidian config (always created — vault is Obsidian-compatible)
+  # .gitignore for runtime state
+  if [ ! -f "${PROJECT_CONFIG}/.gitignore" ]; then
+    cat > "${PROJECT_CONFIG}/.gitignore" << 'GITIGNORE'
+state/
+GITIGNORE
+  fi
+
+  # Obsidian config
   if [ ! -d "${VAULT_DIR}/.obsidian" ]; then
     mkdir -p "${VAULT_DIR}/.obsidian"
     cat > "${VAULT_DIR}/.obsidian/app.json" << 'OBSIDIAN'
@@ -127,383 +131,57 @@ OBSIDIAN
   fi
 }
 
-# ── Project detection ─────────────────────────────────────────────────
+# ── Migrate old state from .claude/team/ ─────────────────────────────
 
-detect_project_name() {
-  local name
-  name=$(gh repo view --json name -q '.name' 2>/dev/null || true)
-  if [ -n "${name}" ]; then
-    printf '%s' "${name}"
-    return
-  fi
-  basename "$(pwd)"
-}
+migrate_old_state() {
+  local old_dir=".claude/team"
+  [ -d "${old_dir}" ] || return 0
 
-# ── PM tier detection ─────────────────────────────────────────────────
+  # Migrate committable config
+  [ -f "${old_dir}/CODEOWNERS" ] && [ ! -f "${PROJECT_CONFIG}/CODEOWNERS" ] && \
+    mv "${old_dir}/CODEOWNERS" "${PROJECT_CONFIG}/CODEOWNERS"
+  [ -f "${old_dir}/domain-config.json" ] && [ ! -f "${PROJECT_CONFIG}/domain-config.json" ] && \
+    mv "${old_dir}/domain-config.json" "${PROJECT_CONFIG}/domain-config.json"
 
-detect_pm_tier() {
-  local owner
-  owner=$(gh repo view --json owner -q '.owner.login' 2>/dev/null || true)
-  if [ -n "${owner}" ]; then
-    local project_count
-    project_count=$(gh project list --owner "${owner}" --format json --limit 1 2>/dev/null | jq '.projects | length' 2>/dev/null || echo "0")
-    if [ "${project_count}" -gt 0 ] 2>/dev/null; then
-      printf 'gh-project'
-      return
-    fi
-  fi
-  if gh issue list --limit 1 &>/dev/null 2>&1; then
-    printf 'gh-issue'
-    return
-  fi
-  printf 'local'
-}
-
-# ── Data gathering ────────────────────────────────────────────────────
-
-gather_git_data() {
-  local branch dirty recent_commits
-  branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "not a git repo")
-  dirty=$(git status --short 2>/dev/null || echo "")
-  recent_commits=$(git log --oneline -5 2>/dev/null || echo "no commits")
-
-  local ahead_behind=""
-  if git rev-parse --abbrev-ref '@{upstream}' &>/dev/null; then
-    ahead_behind=$(git rev-list --left-right --count '@{upstream}...HEAD' 2>/dev/null | awk '{print "behind:"$1" ahead:"$2}')
-  fi
-
-  printf 'Branch: %s\n' "${branch}"
-  if [ -n "${ahead_behind}" ]; then
-    printf 'Remote: %s\n' "${ahead_behind}"
-  fi
-  if [ -n "${dirty}" ]; then
-    printf 'Dirty files:\n%s\n' "${dirty}"
-  else
-    printf 'Working tree: clean\n'
-  fi
-  printf 'Recent commits:\n%s\n' "${recent_commits}"
-}
-
-gather_issues() {
-  local pm_tier="$1"
-  case "${pm_tier}" in
-    gh-project)
-      local owner proj_num
-      owner=$(gh repo view --json owner -q '.owner.login' 2>/dev/null || true)
-      proj_num=$(gh project list --owner "${owner}" --format json --limit 1 2>/dev/null | jq -r '.projects[0].number' 2>/dev/null || true)
-      if [ -n "${proj_num}" ] && [ "${proj_num}" != "null" ]; then
-        gh project item-list "${proj_num}" --owner "${owner}" --limit 10 --format json 2>/dev/null | jq -r '.items[] | "- [\(.status)] \(.title)"' 2>/dev/null || echo "Could not read project items"
-      else
-        echo "No project found"
-      fi
-      ;;
-    gh-issue)
-      gh issue list --limit 10 --json number,title,labels --jq '.[] | "- #\(.number): \(.title)"' 2>/dev/null || echo "Could not read issues"
-      ;;
-    local)
-      local project_name
-      project_name=$(detect_project_name)
-      local backlog="${VAULT_DIR}/projects/${project_name}/backlog.md"
-      if [ -f "${backlog}" ]; then
-        head -20 "${backlog}"
-      else
-        echo "No local backlog yet"
-      fi
-      ;;
-  esac
-}
-
-gather_memory() {
-  local encoded_path
-  encoded_path=$(pwd | sed 's|/|-|g')
-  local memory_dir="${HOME}/.claude/projects/${encoded_path}/memory/MEMORY.md"
-  if [ -f "${memory_dir}" ]; then
-    head -30 "${memory_dir}" 2>/dev/null || echo "No memory"
-  else
-    local name
-    name=$(detect_project_name)
-    local found
-    found=$(find "${HOME}/.claude/projects/" -maxdepth 2 -name "MEMORY.md" -path "*${name}*" 2>/dev/null | head -1)
-    if [ -n "${found}" ]; then
-      head -30 "${found}" 2>/dev/null || echo "No memory"
-    else
-      echo "No project memory found"
-    fi
-  fi
-}
-
-gather_vault_state() {
-  local project_name
-  project_name=$(detect_project_name)
-  local project_vault="${VAULT_DIR}/projects/${project_name}"
-
-  local retro
-  retro=$(ls -t "${project_vault}/retros/"*.md 2>/dev/null | head -1)
-  if [ -n "${retro}" ]; then
-    printf 'Last retro: %s\n' "$(basename "${retro}")"
-    head -5 "${retro}" 2>/dev/null
-  fi
-
-  # Patterns summary (vault compaction)
-  local patterns="${project_vault}/patterns.md"
-  if [ -f "${patterns}" ]; then
-    printf '\nPatterns summary: %s (updated %s)\n' \
-      "$(basename "${patterns}")" \
-      "$(date -r "${patterns}" +%Y-%m-%d 2>/dev/null || stat -c %y "${patterns}" 2>/dev/null | cut -d' ' -f1)"
-  fi
-
-  local persona="${VAULT_DIR}/universal/developer/persona.md"
-  if [ -f "${persona}" ]; then
-    printf '\nDeveloper persona:\n'
-    head -10 "${persona}" 2>/dev/null
-  fi
-
-  local stakeholders="${project_vault}/stakeholders.md"
-  if [ -f "${stakeholders}" ]; then
-    printf '\nStakeholders:\n'
-    head -10 "${stakeholders}" 2>/dev/null
-  fi
-}
-
-gather_pending_proposals() {
-  local project_name
-  project_name=$(detect_project_name)
-  local project_vault="${VAULT_DIR}/projects/${project_name}"
-  local retros_dir="${project_vault}/retros"
-
-  if [ ! -d "${retros_dir}" ]; then
-    return 0
-  fi
-
-  local retro_files
-  retro_files=$(ls -t "${retros_dir}/"*.md 2>/dev/null)
-  if [ -z "${retro_files}" ]; then
-    return 0
-  fi
-
-  local escalated=()
-  local pending=()
-  local total=0
-
-  while IFS= read -r retro_file; do
-    local date_part
-    date_part=$(basename "${retro_file}" .md)
-    # Extract unchecked items from Action Items and Carried Forward sections
-    local items
-    items=$( (
-      sed -n '/^## Action Items$/,/^## /{ /^## /d; p }' "${retro_file}" 2>/dev/null
-      sed -n '/^## Carried Forward$/,/^## /{ /^## /d; p }' "${retro_file}" 2>/dev/null
-    ) | grep '^- \[ \]' 2>/dev/null || true )
-    while IFS= read -r item; do
-      [ -z "${item}" ] && continue
-      total=$((total + 1))
-      if echo "${item}" | grep -q '\*\*ESCALATED'; then
-        escalated+=("- [${date_part}] ${item#- \[ \] }")
-      else
-        pending+=("- [${date_part}] ${item#- \[ \] }")
-      fi
-    done <<< "${items}"
-  done <<< "${retro_files}"
-
-  if [ "${total}" -eq 0 ]; then
-    return 0
-  fi
-
-  # Escalated first, then pending, cap at 5
-  local shown=0
-  local max=5
-  printf 'Pending proposals (%d total):\n' "${total}"
-  for item in "${escalated[@]}"; do
-    [ "${shown}" -ge "${max}" ] && break
-    printf '%s\n' "${item}"
-    shown=$((shown + 1))
-  done
-  for item in "${pending[@]}"; do
-    [ "${shown}" -ge "${max}" ] && break
-    printf '%s\n' "${item}"
-    shown=$((shown + 1))
-  done
-}
-
-gather_vault_index() {
-  local project_name
-  project_name=$(detect_project_name)
-  local project_vault="${VAULT_DIR}/projects/${project_name}"
-  local output=""
-
-  for subdir in decisions research architecture qa-reviews; do
-    local dir="${project_vault}/${subdir}"
-    [ ! -d "${dir}" ] && continue
-    local files
-    files=$(ls -t "${dir}/"*.md 2>/dev/null)
-    [ -z "${files}" ] && continue
-
-    local entries=()
-    local count=0
-    while IFS= read -r f; do
-      [ "${count}" -ge 10 ] && break
-      local title date_val slug
-      slug=$(basename "${f}" .md)
-      # Extract title from first H1, strip template prefix (e.g., "Decision: " or "Research: ")
-      title=$(grep -m1 '^# ' "${f}" 2>/dev/null | sed 's/^# //; s/^[A-Za-z ]*: //' || true)
-      # Extract date from frontmatter
-      date_val=$(sed -n '/^---$/,/^---$/p' "${f}" 2>/dev/null | grep '^date:' | head -1 | sed 's/date: *"\{0,1\}\([^"]*\)"\{0,1\}/\1/' || true)
-      if [ -n "${title}" ]; then
-        if [ -n "${date_val}" ]; then
-          entries+=("${title} (${date_val})")
-        else
-          entries+=("${title}")
-        fi
-      else
-        entries+=("${slug}")
-      fi
-      count=$((count + 1))
-    done <<< "${files}"
-
-    if [ "${#entries[@]}" -gt 0 ]; then
-      local label
-      # Capitalize first letter
-      label=$(echo "${subdir}" | sed 's/-/ /g; s/\b\(.\)/\u\1/g')
-      local joined
-      joined=$(printf '%s, ' "${entries[@]}")
-      joined="${joined%, }"
-      output+="${label}: ${joined}\n"
-    fi
+  # Migrate runtime state
+  for f in activity.jsonl pm-tier; do
+    [ -f "${old_dir}/${f}" ] && mv "${old_dir}/${f}" "${STATE_DIR}/${f}" 2>/dev/null || true
   done
 
-  if [ -n "${output}" ]; then
-    printf '%b' "${output}"
-  fi
+  # Clean up old dir if empty
+  rmdir "${old_dir}" 2>/dev/null || true
 }
 
-# ── Build context ─────────────────────────────────────────────────────
-
-build_context() {
-  local project_name pm_tier
-
-  project_name=$(detect_project_name)
-  pm_tier=$(detect_pm_tier)
-
-  # Cache PM tier
-  mkdir -p "${TEAM_DIR}"
-  printf '%s' "${pm_tier}" > "${TEAM_DIR}/pm-tier"
-
-  local context=""
-  context+="## Project: ${project_name}\n"
-  context+="PM tier: ${pm_tier}\n"
-  context+="Vault: ~/.brains_in_a_hat/vault/projects/${project_name}/\n\n"
-
-  context+="## Git State\n"
-  context+="$(gather_git_data)\n\n"
-
-  context+="## Backlog (${pm_tier})\n"
-  context+="$(gather_issues "${pm_tier}")\n\n"
-
-  context+="## Memory\n"
-  context+="$(gather_memory)\n\n"
-
-  context+="## Vault State\n"
-  context+="$(gather_vault_state)\n\n"
-
-  local vault_index
-  vault_index=$(gather_vault_index)
-  if [ -n "${vault_index}" ]; then
-    context+="## Vault Index\n"
-    context+="${vault_index}\n"
-  fi
-
-  context+="## CODEOWNERS\n"
-  if [ -f "${TEAM_DIR}/CODEOWNERS" ]; then
-    context+="$(grep -v '^#' "${TEAM_DIR}/CODEOWNERS" | grep -v '^$')\n"
-  else
-    context+="No CODEOWNERS file found.\n"
-  fi
-  context+="\n"
-
-  local proposals
-  proposals=$(gather_pending_proposals)
-  if [ -n "${proposals}" ]; then
-    context+="## Pending Proposals\n"
-    context+="${proposals}\n\n"
-  fi
-
-  printf '%s' "${context}"
-}
-
-# ── JSON output ───────────────────────────────────────────────────────
-
-escape_for_json() {
-  local s="$1"
-  s="${s//\\/\\\\}"
-  s="${s//\"/\\\"}"
-  s="${s//$'\n'/\\n}"
-  s="${s//$'\r'/\\r}"
-  s="${s//$'\t'/\\t}"
-  printf '%s' "$s"
-}
+# ── Main ─────────────────────────────────────────────────────────────
 
 main() {
-  # Read hook input from stdin (contains session_id for greeting flag)
-  local HOOK_INPUT
-  HOOK_INPUT=$(cat)
-  local SESSION_ID
-  SESSION_ID=$(echo "$HOOK_INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)
+  cat > /dev/null  # consume stdin
 
-  # Launch dashboard (non-blocking)
+  # Bootstrap directories
+  bootstrap_dirs
+
+  # Migrate old state
+  migrate_old_state
+
+  # Clear stale session state
+  rm -f "${STATE_DIR}/active"
+  rm -f "${STATE_DIR}/session-state.json"
+
+  # Start dashboard (non-blocking)
   dashboard_start
-
-  # Bootstrap vault and team dirs
-  first_run_setup
-
-  # Proactive greeting flag — consumed by UserPromptSubmit hook (first-prompt-greeting)
-  if [ -n "${SESSION_ID}" ]; then
-    touch "/tmp/neal-greeting-${SESSION_ID}"
-  fi
 
   # Register project for dashboard multi-project discovery
   local project_name
   project_name=$(detect_project_name)
-  local GLOBAL_SESSIONS="${HOME}/.claude/team/active-sessions.jsonl"
-  mkdir -p "$(dirname "${GLOBAL_SESSIONS}")"
+  local GLOBAL_SESSIONS="${HOME}/.brains_in_a_hat/active-sessions.jsonl"
   jq -nc \
     --arg ts "$(date -Iseconds)" \
     --arg project "$(pwd)" \
     --arg name "${project_name}" \
     '{ts:$ts, project:$project, name:$name}' >> "${GLOBAL_SESSIONS}"
 
-  # Read Neal persona
-  local persona=""
-  local persona_file="${PLUGIN_ROOT}/hooks/neal-persona.md"
-  if [ -f "${persona_file}" ]; then
-    persona=$(cat "${persona_file}")
-  fi
-
-  # Gather dynamic project context
-  local dynamic_context
-  dynamic_context=$(build_context)
-
-  # Combine persona + dynamic context
-  local full_context=""
-  if [ -n "${persona}" ]; then
-    full_context="${persona}\n\n--- SESSION CONTEXT ---\n\n${dynamic_context}"
-  else
-    full_context="${dynamic_context}"
-  fi
-
-  full_context="${full_context}\n\nPLAN MODE DETECTION: If a system reminder says plan mode is active, follow PLAN MODE SPAWN protocol instead of ON SESSION START."
-
-  local escaped_context
-  escaped_context=$(escape_for_json "${full_context}")
-
-  # Output JSON for Claude Code hook system
-  cat <<EOF
-{
-  "hookSpecificOutput": {
-    "hookEventName": "SessionStart",
-    "additionalContext": "${escaped_context}"
-  }
-}
-EOF
+  # No output — no persona injection.
+  # User activates team mode with /assemble.
 }
 
 main
