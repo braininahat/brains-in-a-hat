@@ -1,0 +1,24 @@
+:root {
+  --bg: #0f0f17;
+  --text: #e8e6e3;
+  --text-dim: #9b9a97;
+  --text-muted: #5e5d5a;
+  --accent: #e09145;
+  --border: #2a2a36;
+  --surface: #16161f;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--bg);
+}
