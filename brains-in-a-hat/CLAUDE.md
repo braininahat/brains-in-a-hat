@@ -55,3 +55,18 @@ All vault files use Dataview frontmatter (`type`, `project`, `agents`, `date`, `
 Plan mode restricts file mutations (Write, Edit, destructive Bash). Only 7 plan-safe agents spawn:
 Mason, Hunter, Drew, Sage, Tessa, Paige, Reed.
 The remaining 12 are deferred until plan mode exits.
+
+## Git Workflow
+
+**No direct pushes to main.** Use branches + PRs.
+
+- Commits auto-bump **patch** version (x.x.X) in all `plugin.json` files
+- PR merges auto-bump **minor** version (x.X.0)
+- **Major** bumps (X.0.0) are manual
+- Skip bump with `SKIP_VERSION_BUMP=1 git commit ...`
+- Override push protection with `ALLOW_MAIN_PUSH=1 git push ...`
+
+Git hooks live in `scripts/git-hooks/`. Install after clone:
+```bash
+cp scripts/git-hooks/* .git/hooks/ && chmod +x .git/hooks/pre-*
+```
