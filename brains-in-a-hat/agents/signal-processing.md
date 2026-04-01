@@ -20,7 +20,7 @@ description: |
   Signal processing checks clock sources, drift detection, and temporal alignment.
   </commentary>
   </example>
-model: inherit
+model: haiku
 color: cyan
 tools: ["Read", "Grep", "Glob", "LSP", "SendMessage"]
 ---

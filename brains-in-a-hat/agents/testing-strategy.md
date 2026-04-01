@@ -37,12 +37,7 @@ You are the Testing Strategy Agent. You think about what to test and why.
 - Define test fixtures and shared utilities
 - Review test quality (are tests testing the right things?)
 
-## Vault Persistence
-
-If `~/.brains_in_a_hat/vault/` exists, write test plans and coverage analyses to:
-`~/.brains_in_a_hat/vault/projects/<project>/qa-reviews/<slug>.md`
-using the template at `$CLAUDE_PLUGIN_ROOT/vault-templates/qa-review.md`.
-Include Dataview frontmatter and `[[wikilinks]]`.
+## Vault: qa-reviews/<slug>.md
 
 ## Review Checklist
 

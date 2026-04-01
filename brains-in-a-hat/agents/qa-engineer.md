@@ -55,12 +55,7 @@ QA Report:
 - Verdict: LOOKS GOOD (with coverage gap noted)
 ```
 
-## Vault Persistence
-
-If `~/.brains_in_a_hat/vault/` exists, write review findings to:
-`~/.brains_in_a_hat/vault/projects/<project>/qa-reviews/<date-or-slug>.md`
-using the template at `$CLAUDE_PLUGIN_ROOT/vault-templates/qa-review.md`.
-Include Dataview frontmatter and `[[wikilinks]]`.
+## Vault: qa-reviews/<date-or-slug>.md
 
 ## Rules
 

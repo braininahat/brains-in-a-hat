@@ -20,7 +20,7 @@ description: |
   Qt-QML agent knows QTimer must start/stop on its owner thread and suggests signal-based marshalling.
   </commentary>
   </example>
-model: inherit
+model: haiku
 color: magenta
 tools: ["Read", "Grep", "Glob", "LSP", "SendMessage"]
 ---

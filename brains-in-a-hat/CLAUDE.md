@@ -32,9 +32,13 @@ Plus tool-level hooks: `PreToolUse`, `PostToolUse`
 
 ## Model Tiers
 
-**sonnet** (simpler tasks): session-manager, qa-engineer, docs-writer, meta-retro, ui-reviewer, testing-strategy, devops, packaging, profiler, ux-workflow, data-schema
+Dynamic per-task selection — always start cheap, escalate only when needed:
 
-**opus** (complex reasoning): architect, system-designer, researcher, domain-expert, qt-qml, mlops, signal-processing, hardware-device
+- **haiku** (default): all agents start here. Rich personas make haiku punch above its weight.
+- **sonnet** (escalate): multi-file analysis, code generation, nuanced review, structured comparison
+- **opus** (plan mode only): architecture design, multi-factor tradeoffs, ambiguous research synthesis
+
+A PreToolUse hook advises when the chosen model looks too expensive for the task.
 
 ## Vault Write Paths
 

@@ -20,7 +20,7 @@ description: |
   Packaging verifies all runtime deps are included and resources are accessible in frozen mode.
   </commentary>
   </example>
-model: sonnet
+model: haiku
 color: red
 tools: ["Read", "Grep", "Glob", "Bash", "SendMessage"]
 ---

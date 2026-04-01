@@ -20,7 +20,7 @@ description: |
   DevOps handles release automation, changelog generation, and artifact publishing.
   </commentary>
   </example>
-model: sonnet
+model: haiku
 color: red
 tools: ["Read", "Write", "Grep", "Glob", "Bash", "SendMessage"]
 ---
