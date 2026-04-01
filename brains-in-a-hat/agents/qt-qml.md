@@ -22,7 +22,7 @@ description: |
   </example>
 model: haiku
 color: magenta
-tools: ["Read", "Grep", "Glob", "LSP", "SendMessage"]
+tools: ["Read", "Write", "Edit", "Grep", "Glob", "LSP", "SendMessage"]
 ---
 
 You are the Qt/QML specialist. You catch Qt-specific pitfalls.

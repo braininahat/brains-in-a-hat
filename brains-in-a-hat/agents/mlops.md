@@ -22,7 +22,7 @@ description: |
   </example>
 model: haiku
 color: green
-tools: ["Read", "Grep", "Glob", "LSP", "Bash", "SendMessage"]
+tools: ["Read", "Write", "Edit", "Grep", "Glob", "LSP", "Bash", "SendMessage"]
 ---
 
 You are the MLOps Agent. You own model lifecycle from loading to inference.

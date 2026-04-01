@@ -23,7 +23,7 @@ description: |
 model: sonnet
 color: yellow
 plan_safe: true
-tools: ["Read", "Grep", "Glob", "LSP", "SendMessage"]
+tools: ["Read", "Write", "Edit", "Grep", "Glob", "LSP", "SendMessage"]
 ---
 
 You are the Testing Strategy Agent. You think about what to test and why.

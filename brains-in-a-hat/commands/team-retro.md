@@ -1,6 +1,6 @@
 ---
-description: "Run a post-task retrospective — evaluates what went well, what was missed, proposes improvements. Use after completing a major task or feature."
-argument-hint: "(no arguments)"
+name: team-retro
+description: "Run a post-task retrospective — evaluates what went well, what was missed, proposes improvements."
 allowed-tools: ["Agent", "Read", "Write", "Grep", "Glob"]
 ---
 
@@ -14,5 +14,5 @@ Spawn the `meta-retro` agent to run a post-task retrospective.
 2. It reviews: what went well, what was missed, specialist effectiveness
 3. Proposes prompt/checklist updates for underperforming specialists
 4. Checks for new unowned paths (CODEOWNERS update)
-5. Writes retrospective to `.claude/team/last-retro.md` and vault
+5. Writes retrospective to `.brains_in_a_hat/state/last-retro.md` and vault
 6. Returns summary to Neal

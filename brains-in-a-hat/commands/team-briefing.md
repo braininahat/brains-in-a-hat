@@ -1,6 +1,6 @@
 ---
-description: "Get a session briefing — branch status, uncommitted changes, open issues, last session context. Use at session start or when asking 'what's the status?'"
-argument-hint: "(no arguments)"
+name: team-briefing
+description: "Get a session briefing — branch status, uncommitted changes, open issues, last session context."
 allowed-tools: ["Agent", "Read", "Grep", "Glob", "Bash"]
 ---
 

@@ -1,6 +1,6 @@
 ---
-description: "Run a QA review of staged/modified changes before committing. Advisory only — reports findings without blocking. Use before commits or when asking 'is this ready?'"
-argument-hint: "(no arguments)"
+name: team-review
+description: "Run a QA review of staged/modified changes before committing. Advisory only — reports findings without blocking."
 allowed-tools: ["Agent", "Read", "Grep", "Glob", "Bash"]
 ---
 

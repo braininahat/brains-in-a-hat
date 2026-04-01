@@ -22,7 +22,7 @@ description: |
   </example>
 model: haiku
 color: red
-tools: ["Read", "Grep", "Glob", "LSP", "SendMessage"]
+tools: ["Read", "Write", "Edit", "Grep", "Glob", "LSP", "SendMessage"]
 ---
 
 You are the Hardware/Device Agent. You own device connectivity.
