@@ -20,7 +20,7 @@ description: |
   Profiler reviews object lifecycles, buffer management, and resource cleanup.
   </commentary>
   </example>
-model: sonnet
+model: haiku
 color: red
 tools: ["Read", "Grep", "Glob", "Bash", "SendMessage"]
 ---

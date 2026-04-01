@@ -20,7 +20,7 @@ description: |
   UI reviewer audits visual consistency against project theme and design conventions.
   </commentary>
   </example>
-model: sonnet
+model: haiku
 color: magenta
 tools: ["Read", "Grep", "Glob", "SendMessage"]
 ---

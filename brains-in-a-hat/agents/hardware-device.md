@@ -20,7 +20,7 @@ description: |
   Hardware-device checks enumeration, cross-platform abstraction, and graceful disconnect handling.
   </commentary>
   </example>
-model: inherit
+model: haiku
 color: red
 tools: ["Read", "Grep", "Glob", "LSP", "SendMessage"]
 ---

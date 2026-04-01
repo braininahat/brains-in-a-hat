@@ -15,12 +15,13 @@ AGENT LIFECYCLE:
 Spawn prompt template:
 "You are {Name} on team 'hatbrains-{project}'. Your role: {Domain}.
 
+STYLE: Maximally concise. Bullets over prose. ≤10 lines for simple tasks. No preamble, no summaries. Findings and actions only.
+
 RULES:
-- When you receive a task (via SendMessage or TaskUpdate), do the work, then report findings to Neal via SendMessage.
-- You may message teammates directly by name when you need their input.
-- Use TaskUpdate to mark tasks completed when done.
-- Keep messages concise — findings only, no status chatter.
-- After completing a task, remain available for follow-up work."
+- Do the work, report findings to Neal via SendMessage.
+- Message teammates by name if you need their input.
+- TaskUpdate to mark tasks done.
+- After completing, remain available for follow-up."
 
 PLAN MODE -- when plan mode is active at session start:
 Plan mode restricts FILE MUTATIONS (Write, Edit, Bash). It does NOT restrict
@@ -76,20 +77,21 @@ Semantic overrides (always apply regardless of CODEOWNERS):
 - Audio/video/streaming -> also assign to signal-processing
 - Device/hardware code -> also assign to hardware-device
 
-MODEL SELECTION (by task complexity, not agent identity):
-- haiku: lookups, existence checks, vault searches, mechanical transforms, file listing
-- sonnet: code review, documentation, standard analysis, test runs, reporting
-- opus: architecture design, deep investigation, multi-factor tradeoffs, ambiguous problems
+MODEL SELECTION — always start cheap, escalate only when needed:
+1. Default: haiku for all agents
+2. Bump to sonnet when the task involves: multi-file analysis, code generation,
+   nuanced review, structured comparison, or anything requiring judgment
+3. Bump to opus ONLY in plan mode for: architecture design, multi-factor tradeoffs,
+   ambiguous research synthesis
+4. Never opus in normal mode — sonnet ceiling
 
-Each agent has a default tier (floor), not a ceiling. Override based on the specific task:
-- A researcher doing a vault lookup → haiku
-- An architect reviewing a 3-line change → sonnet
-- A docs-writer designing a new spec from scratch → opus
-Default floors: sonnet for session-manager, qa-engineer, docs-writer, meta-retro, ui-reviewer,
-testing-strategy, devops, packaging, profiler, ux-workflow, data-schema.
-Default floors: opus for architect, system-designer, researcher, domain-expert, qt-qml, mlops,
-signal-processing, hardware-device.
-A PreToolUse hook will advise if the chosen model seems too expensive for the task.
+The PreToolUse hook scores task descriptions and advises if model looks wrong.
+When in doubt, start haiku — Neal can re-assign at sonnet if output quality is poor.
+
+Examples:
+- "check if file X exists and report" → haiku
+- "review this 200-line diff for architectural issues" → sonnet
+- "design a new subsystem comparing 3 approaches with tradeoffs" → opus (plan mode only)
 
 QA IS ADVISORY: qa-engineer reports findings but never blocks commits.
 

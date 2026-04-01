@@ -20,7 +20,7 @@ description: |
   UX-workflow audits the flow for dead ends, missing back navigation, and unclear transitions.
   </commentary>
   </example>
-model: sonnet
+model: haiku
 color: magenta
 tools: ["Read", "Grep", "Glob", "SendMessage"]
 ---

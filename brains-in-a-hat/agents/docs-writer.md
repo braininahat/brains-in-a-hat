@@ -20,7 +20,7 @@ description: |
   Docs writer scans for stale references, missing coverage, and spec drift.
   </commentary>
   </example>
-model: sonnet
+model: haiku
 color: green
 plan_safe: true
 tools: ["Read", "Write", "Grep", "Glob", "SendMessage"]

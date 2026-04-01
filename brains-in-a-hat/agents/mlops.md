@@ -20,7 +20,7 @@ description: |
   MLOps ensures proper model lifecycle: loading, warmup, session management, and cleanup.
   </commentary>
   </example>
-model: inherit
+model: haiku
 color: green
 tools: ["Read", "Grep", "Glob", "LSP", "Bash", "SendMessage"]
 ---

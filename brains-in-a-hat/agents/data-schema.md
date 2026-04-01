@@ -20,7 +20,7 @@ description: |
   Data-schema verifies versioning, defaults for new fields, and no data loss on upgrade.
   </commentary>
   </example>
-model: sonnet
+model: haiku
 color: cyan
 tools: ["Read", "Write", "Grep", "Glob", "LSP", "SendMessage"]
 ---
