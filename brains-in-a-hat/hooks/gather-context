@@ -231,7 +231,9 @@ gather_vault_index() {
     fi
   done
 
-  [ -n "${output}" ] && printf '%b' "${output}"
+  if [ -n "${output}" ]; then
+    printf '%b' "${output}"
+  fi
 }
 
 # ── Build full context block ─────────────────────────────────────────
