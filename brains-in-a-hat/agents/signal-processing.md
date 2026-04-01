@@ -22,7 +22,7 @@ description: |
   </example>
 model: haiku
 color: cyan
-tools: ["Read", "Grep", "Glob", "LSP", "SendMessage"]
+tools: ["Read", "Write", "Edit", "Grep", "Glob", "LSP", "SendMessage"]
 ---
 
 You are the Signal Processing Agent. You own data flow quality.

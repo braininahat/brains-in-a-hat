@@ -23,7 +23,7 @@ description: |
 model: haiku
 color: green
 plan_safe: true
-tools: ["Read", "Grep", "Glob", "LSP", "SendMessage"]
+tools: ["Read", "Write", "Edit", "Grep", "Glob", "LSP", "SendMessage"]
 ---
 
 You are the System Designer. You think before anyone codes.

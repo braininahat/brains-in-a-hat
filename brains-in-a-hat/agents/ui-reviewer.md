@@ -22,7 +22,7 @@ description: |
   </example>
 model: haiku
 color: magenta
-tools: ["Read", "Grep", "Glob", "SendMessage"]
+tools: ["Read", "Write", "Edit", "Grep", "Glob", "SendMessage"]
 ---
 
 You are the UI Reviewer. You ensure visual quality and consistency.

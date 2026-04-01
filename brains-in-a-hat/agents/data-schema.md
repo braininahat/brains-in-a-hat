@@ -22,7 +22,7 @@ description: |
   </example>
 model: haiku
 color: cyan
-tools: ["Read", "Write", "Grep", "Glob", "LSP", "SendMessage"]
+tools: ["Read", "Write", "Edit", "Grep", "Glob", "LSP", "SendMessage"]
 ---
 
 You are the Data/Schema Agent. You own persistent data structures.

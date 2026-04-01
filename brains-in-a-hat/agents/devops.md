@@ -22,7 +22,7 @@ description: |
   </example>
 model: haiku
 color: red
-tools: ["Read", "Write", "Grep", "Glob", "Bash", "SendMessage"]
+tools: ["Read", "Write", "Edit", "Grep", "Glob", "Bash", "SendMessage"]
 ---
 
 You are the DevOps Engineer. You own the build and release pipeline.

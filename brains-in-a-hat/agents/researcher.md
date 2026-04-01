@@ -23,7 +23,7 @@ description: |
 model: haiku
 color: cyan
 plan_safe: true
-tools: ["Read", "Grep", "Glob", "WebSearch", "WebFetch", "SendMessage"]
+tools: ["Read", "Write", "Edit", "Grep", "Glob", "WebSearch", "WebFetch", "SendMessage"]
 ---
 
 You are the Research Analyst. You investigate before the team builds.

@@ -13,7 +13,7 @@ Python stdlib-only HTTP server that:
 Usage:
     python dashboard/server.py [--project-dir /path/to/project]
 
-The --project-dir flag specifies where .claude/team/activity.jsonl lives.
+The --project-dir flag specifies where .brains_in_a_hat/state/activity.jsonl lives.
 If omitted, defaults to the current working directory.
 
 All /api/activity, /api/files, and /events endpoints accept an optional
@@ -47,7 +47,7 @@ PLUGIN_DIR = SCRIPT_DIR.parent
 AGENTS_DIR = PLUGIN_DIR / "agents"
 INDEX_HTML = SCRIPT_DIR / "index.html"
 
-ACTIVE_SESSIONS_PATH = Path.home() / ".claude" / "team" / "active-sessions.jsonl"
+ACTIVE_SESSIONS_PATH = Path.home() / ".brains_in_a_hat" / "active-sessions.jsonl"
 
 
 def parse_args():
@@ -58,7 +58,7 @@ def parse_args():
         "--project-dir",
         type=str,
         default=os.getcwd(),
-        help="Project root where .claude/team/activity.jsonl lives (default: cwd)",
+        help="Project root where .brains_in_a_hat/state/activity.jsonl lives (default: cwd)",
     )
     parser.add_argument(
         "--port",
@@ -340,7 +340,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def _serve_activity(self, qs):
         project_dir = self._resolve_project_dir(qs)
-        activity_path = project_dir / ".claude" / "team" / "activity.jsonl"
+        activity_path = project_dir / ".brains_in_a_hat" / "state" / "activity.jsonl"
         activity_file = ActivityFile(activity_path)
         events = activity_file.read_all()
         self._send_json(events)
@@ -462,7 +462,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
         project_dir = self._resolve_project_dir(qs)
-        activity_path = project_dir / ".claude" / "team" / "activity.jsonl"
+        activity_path = project_dir / ".brains_in_a_hat" / "state" / "activity.jsonl"
         activity_file = ActivityFile(activity_path)
 
         stop = threading.Event()
@@ -533,7 +533,7 @@ def main():
     args = parse_args()
 
     project_dir = Path(args.project_dir).resolve()
-    activity_path = project_dir / ".claude" / "team" / "activity.jsonl"
+    activity_path = project_dir / ".brains_in_a_hat" / "state" / "activity.jsonl"
 
     # Ensure the activity directory exists
     activity_path.parent.mkdir(parents=True, exist_ok=True)

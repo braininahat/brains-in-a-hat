@@ -17,17 +17,9 @@ VAULT_DIR="${HOME}/.brains_in_a_hat/vault"
 STATE_DIR=".brains_in_a_hat/state"
 PROJECT_CONFIG=".brains_in_a_hat"
 
-# ── Project detection ─────────────────────────────────────────────────
+# ── Shared helpers ────────────────────────────────────────────────────
 
-detect_project_name() {
-  local name
-  name=$(gh repo view --json name -q '.name' 2>/dev/null || true)
-  if [ -n "${name}" ]; then
-    printf '%s' "${name}"
-    return
-  fi
-  basename "$(pwd)"
-}
+source "${SCRIPT_DIR}/lib-common.sh"
 
 # ── Dashboard auto-start ─────────────────────────────────────────────
 
@@ -163,9 +155,11 @@ main() {
   # Migrate old state
   migrate_old_state
 
-  # Clear stale session state
+  # Only clear session state if no other session is active
+  if [ ! -f "${STATE_DIR}/active" ]; then
+    rm -f "${STATE_DIR}/session-state.json"
+  fi
   rm -f "${STATE_DIR}/active"
-  rm -f "${STATE_DIR}/session-state.json"
 
   # Start dashboard (non-blocking)
   dashboard_start

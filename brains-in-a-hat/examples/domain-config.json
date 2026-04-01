@@ -1,5 +1,5 @@
 {
-  "_comment": "Example domain configuration for a clinical speech pathology project. Copy to .claude/team/domain-config.json and customize for your domain.",
+  "_comment": "Example domain configuration for a clinical speech pathology project. Copy to .brains_in_a_hat/domain-config.json and customize for your domain.",
   "domain": "speech-language pathology",
   "key_concepts": [
     "phoneme scoring",

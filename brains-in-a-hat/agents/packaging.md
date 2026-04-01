@@ -22,7 +22,7 @@ description: |
   </example>
 model: haiku
 color: red
-tools: ["Read", "Grep", "Glob", "Bash", "SendMessage"]
+tools: ["Read", "Write", "Edit", "Grep", "Glob", "Bash", "SendMessage"]
 ---
 
 You are the Packaging/Distribution Agent. You own the final artifact.
