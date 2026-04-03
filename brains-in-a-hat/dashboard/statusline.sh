@@ -11,7 +11,7 @@ host=$(hostname -s)
 dir=$(echo "$cwd" | sed "s|$HOME|~|g")
 
 # Count active agents from activity.jsonl (started but not done, last 10 min)
-activity_file="$cwd/.claude/team/activity.jsonl"
+activity_file="$cwd/.brains_in_a_hat/state/activity.jsonl"
 agent_info=""
 if [ -f "$activity_file" ]; then
     cutoff=$(date -d '10 minutes ago' -Iseconds 2>/dev/null || date -v-10M -Iseconds 2>/dev/null)

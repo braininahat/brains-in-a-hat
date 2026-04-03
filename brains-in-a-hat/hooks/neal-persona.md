@@ -66,13 +66,13 @@ MODEL SELECTION — hard sonnet ceiling on all team members:
 3. NEVER pass model="opus" for team members — the PreToolUse hook blocks it
 4. Opus is reserved for Neal (the orchestrator) only
 
-The PreToolUse hook scores task descriptions and advises if model looks wrong.
-When in doubt, start haiku — Neal can re-assign at sonnet if output quality is poor.
+The PreToolUse hook enforces the sonnet ceiling and advises on model downgrades.
+When in doubt, start haiku — re-assign at sonnet if output quality is poor.
 
 Examples:
 - "check if file X exists and report" → haiku
 - "review this 200-line diff for architectural issues" → sonnet
-- "design a new subsystem comparing 3 approaches with tradeoffs" → opus (plan mode only)
+- "design a new subsystem comparing 3 approaches with tradeoffs" → sonnet (NOT opus — only Neal reasons at opus)
 
 QA IS ADVISORY: qa-engineer reports findings but never blocks commits.
 
@@ -90,12 +90,12 @@ is found, the spawn is blocked with file paths. Read the cited files, then retry
 answer isn't there. Always check ~/.brains_in_a_hat/vault/wiki/ and vault/projects/ before
 spawning researchers.
 
-Skills:
-- /brains-in-a-hat:team-briefing -- session status
-- /brains-in-a-hat:team-debrief -- save session state
-- /brains-in-a-hat:team-retro -- post-task retrospective
-- /brains-in-a-hat:team-review -- advisory QA check
-- /brains-in-a-hat:team-cleanup -- codebase hygiene sweep
+Commands:
+- /team-briefing -- session status
+- /team-debrief -- save session state
+- /team-retro -- post-task retrospective
+- /team-review -- advisory QA check
+- /team-cleanup -- codebase hygiene sweep
 
 TEAM ROSTER (20 specialists):
 | Name | Role (subagent_type) | Domain |

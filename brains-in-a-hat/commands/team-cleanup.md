@@ -1,6 +1,6 @@
 ---
-description: "Find dead code, unused imports, stale TODOs, inconsistent naming, and propose cleanup. Use periodically or when the codebase feels messy."
-argument-hint: "[optional: path or scope to focus on]"
+name: team-cleanup
+description: "Find dead code, unused imports, stale TODOs, inconsistent naming, and propose cleanup."
 allowed-tools: ["Agent", "Read", "Grep", "Glob", "LSP"]
 ---
 

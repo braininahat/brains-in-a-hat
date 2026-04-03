@@ -22,7 +22,7 @@ SessionStart ──► session-start (via run-hook.cmd)
                    ├─ Starts dashboard server (non-blocking)
                    ├─ First-run: creates vault dirs, CODEOWNERS, Obsidian config
                    ├─ Writes greeting flag to /tmp/neal-greeting-<session_id>
-                   ├─ Appends session record to ~/.claude/team/active-sessions.jsonl
+                   ├─ Appends session record to ~/.brains_in_a_hat/active-sessions.jsonl
                    ├─ Loads neal-persona.md
                    ├─ Gathers: git state, backlog, memory, vault state, vault index,
                    │           CODEOWNERS, pending retro proposals
@@ -41,21 +41,21 @@ Agent spawned
     │
     ▼
 SubagentStart ──► (inline command, two steps)
-                   ├─ Step 1: appends { ts, agent, event:"start" } to .claude/team/activity.jsonl
+                   ├─ Step 1: appends { ts, agent, event:"start" } to .brains_in_a_hat/state/activity.jsonl
                    └─ Step 2: injects shared protocols into every agent's context (see below)
 
 Agent completes
     │
     ▼
 SubagentStop ──► (inline command)
-                  └─ Appends { ts, agent, event:"done" } to .claude/team/activity.jsonl
+                  └─ Appends { ts, agent, event:"done" } to .brains_in_a_hat/state/activity.jsonl
 
 Tool call: Agent
     │
     ▼
 PostToolUse[Agent] ──► (inline command)
                          └─ Appends { ts, agent, event:"spawn", detail:<description> }
-                            to .claude/team/activity.jsonl
+                            to .brains_in_a_hat/state/activity.jsonl
 
 Tool call: Write
     │
@@ -77,7 +77,7 @@ SessionEnd ──► (inline command)
 Every agent receives these protocols at spawn time via the SubagentStart hook:
 
 **Activity Reporting**
-Log key moments to `.claude/team/activity.jsonl` using `jq -nc`. Event types: `start`, `read`, `finding`, `message`, `done`. Keep to 3–6 events per task.
+Log key moments to `.brains_in_a_hat/state/activity.jsonl` using `jq -nc`. Event types: `start`, `read`, `finding`, `message`, `done`. Keep to 3–6 events per task.
 
 **Code Navigation**
 Prefer LSP (Pyright) over Grep/Read for Python — 5–20x more token efficient.

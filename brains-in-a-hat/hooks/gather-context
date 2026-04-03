@@ -24,12 +24,21 @@ detect_pm_tier() {
     cat "${STATE_DIR}/pm-tier"
     return
   fi
-  local owner
+  local owner repo_name
   owner=$(gh repo view --json owner -q '.owner.login' 2>/dev/null || true)
+  repo_name=$(detect_project_name)
   if [ -n "${owner}" ]; then
-    local project_count
-    project_count=$(gh project list --owner "${owner}" --format json --limit 1 2>/dev/null | jq '.projects | length' 2>/dev/null || echo "0")
-    if [ "${project_count}" -gt 0 ] 2>/dev/null; then
+    # Check for a project matching this repo (not just any owner project)
+    local matching_proj
+    matching_proj=$(gh project list --owner "${owner}" --format json 2>/dev/null | \
+      jq -r --arg name "$repo_name" \
+        '.projects[] | select(.title | ascii_downcase | contains($name | ascii_downcase)) | .number' 2>/dev/null | \
+      head -1) || true
+    # Also check for pinned project number
+    if [ -z "${matching_proj}" ] && [ -f ".brains_in_a_hat/config.json" ]; then
+      matching_proj=$(jq -r '.gh_project_number // empty' ".brains_in_a_hat/config.json" 2>/dev/null || true)
+    fi
+    if [ -n "${matching_proj}" ]; then
       printf 'gh-project'
       return
     fi
@@ -70,13 +79,25 @@ gather_issues() {
   local pm_tier="$1"
   case "${pm_tier}" in
     gh-project)
-      local owner proj_num
+      local owner repo_name proj_num
       owner=$(gh repo view --json owner -q '.owner.login' 2>/dev/null || true)
-      proj_num=$(gh project list --owner "${owner}" --format json --limit 1 2>/dev/null | jq -r '.projects[0].number' 2>/dev/null || true)
+      repo_name=$(detect_project_name)
+      # Check for pinned project number first
+      proj_num=""
+      if [ -f ".brains_in_a_hat/config.json" ]; then
+        proj_num=$(jq -r '.gh_project_number // empty' ".brains_in_a_hat/config.json" 2>/dev/null || true)
+      fi
+      # Fallback: match by repo name against project titles
+      if [ -z "${proj_num}" ] && [ -n "${owner}" ]; then
+        proj_num=$(gh project list --owner "${owner}" --format json 2>/dev/null | \
+          jq -r --arg name "$repo_name" \
+            '.projects[] | select(.title | ascii_downcase | contains($name | ascii_downcase)) | .number' 2>/dev/null | \
+          head -1) || true
+      fi
       if [ -n "${proj_num}" ] && [ "${proj_num}" != "null" ]; then
         gh project item-list "${proj_num}" --owner "${owner}" --limit 10 --format json 2>/dev/null | jq -r '.items[] | "- [\(.status)] \(.title)"' 2>/dev/null || echo "Could not read project items"
       else
-        echo "No project found"
+        echo "No matching project found for ${repo_name}"
       fi
       ;;
     gh-issue)
@@ -105,7 +126,7 @@ gather_memory() {
     local name
     name=$(detect_project_name)
     local found
-    found=$(find "${HOME}/.claude/projects/" -maxdepth 2 -name "MEMORY.md" -path "*${name}*" 2>/dev/null | head -1)
+    found=$(find "${HOME}/.claude/projects/" -maxdepth 2 -name "MEMORY.md" -path "*-${name}/memory/MEMORY.md" 2>/dev/null | head -1)
     if [ -n "${found}" ]; then
       cat "${found}" 2>/dev/null || echo "No memory"
     else
@@ -220,7 +241,9 @@ gather_vault_index() {
     fi
   done
 
-  [ -n "${output}" ] && printf '%b' "${output}"
+  if [ -n "${output}" ]; then
+    printf '%b' "${output}"
+  fi
 }
 
 # ── Build full context block ─────────────────────────────────────────
@@ -230,9 +253,10 @@ build_context() {
   project_name=$(detect_project_name)
   pm_tier=$(detect_pm_tier)
 
-  # Cache PM tier
+  # Cache PM tier (atomic write)
   mkdir -p "${STATE_DIR}"
-  printf '%s' "${pm_tier}" > "${STATE_DIR}/pm-tier"
+  printf '%s' "${pm_tier}" > "${STATE_DIR}/pm-tier.tmp.$$" && \
+    mv "${STATE_DIR}/pm-tier.tmp.$$" "${STATE_DIR}/pm-tier"
 
   local context=""
   context+="## Project: ${project_name}\n"
@@ -249,6 +273,15 @@ build_context() {
   if [ -n "${vault_index}" ]; then
     context+="## Vault Index\n${vault_index}\n"
   fi
+
+  context+="## Workflow\n"
+  if [ -f ".brains_in_a_hat/workflow.md" ]; then
+    # Inject workflow content, skipping YAML frontmatter
+    context+="$(sed '1{/^---$/!q}; 1,/^---$/d' ".brains_in_a_hat/workflow.md")\n"
+  else
+    context+="No workflow evolved yet — generated after first retro.\n"
+  fi
+  context+="\n"
 
   context+="## CODEOWNERS\n"
   if [ -f ".brains_in_a_hat/CODEOWNERS" ]; then

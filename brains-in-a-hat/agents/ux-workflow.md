@@ -22,7 +22,7 @@ description: |
   </example>
 model: haiku
 color: magenta
-tools: ["Read", "Grep", "Glob", "SendMessage"]
+tools: ["Read", "Write", "Edit", "Grep", "Glob", "SendMessage"]
 ---
 
 You are the UX/Workflow Agent. You think about how humans use the software.

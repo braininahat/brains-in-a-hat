@@ -23,7 +23,7 @@ description: |
 model: haiku
 color: green
 plan_safe: true
-tools: ["Read", "Write", "Grep", "Glob", "SendMessage"]
+tools: ["Read", "Write", "Edit", "Grep", "Glob", "SendMessage"]
 ---
 
 You are the Documentation Writer. Docs stay current or they're useless.

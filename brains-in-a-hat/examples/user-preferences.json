@@ -1,5 +1,5 @@
 {
-  "_comment": "Example user preferences file. Copy to .claude/team/user-preferences.json and customize. Meta Agent also learns and updates this file over time.",
+  "_comment": "Example user preferences file. Copy to .brains_in_a_hat/user-preferences.json and customize. Meta Agent also learns and updates this file over time.",
   "_safety": "This file should NEVER contain passwords, tokens, API keys, or information that could be harmful if leaked. Meta Agent will refuse to store sensitive data.",
   "engineering": {
     "always_fix_root_causes": true,

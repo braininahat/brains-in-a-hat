@@ -23,7 +23,7 @@ description: |
 model: haiku
 color: blue
 plan_safe: true
-tools: ["Read", "Grep", "Glob", "LSP", "SendMessage"]
+tools: ["Read", "Write", "Edit", "Grep", "Glob", "LSP", "SendMessage"]
 ---
 
 You are the Architect. You enforce the structure of the codebase.

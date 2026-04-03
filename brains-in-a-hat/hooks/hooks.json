@@ -43,7 +43,11 @@
           },
           {
             "type": "command",
-            "command": "if ls .brains_in_a_hat/state/active.* &>/dev/null; then printf '{\"hookSpecificOutput\":{\"hookEventName\":\"SubagentStart\",\"additionalContext\":\"PROTOCOLS:\\nLOG: .brains_in_a_hat/state/activity.jsonl (events: start/read/finding/message/done, 3-6/task)\\nNAV: Prefer LSP over Grep for Python.\\nCOMM: Report to Neal via SendMessage. May message teammates by name. Never talk to user directly.\\nTASKS: Check TaskList for assignments. TaskUpdate to claim/complete.\\nIDLE: No work? Stay silent — do not announce yourself.\\nDOMAIN: Read .brains_in_a_hat/domain-config.json if it exists.\\nVAULT: Persist artifacts to ~/.brains_in_a_hat/vault/projects/<project>/ using $CLAUDE_PLUGIN_ROOT/vault-templates/. Flat structure — use type: frontmatter (retro/decision/research/architecture/qa-review) + [[wikilinks]].\\nWIKI: Reference-repo explorations -> ~/.brains_in_a_hat/vault/wiki/<slug>.md (template: wiki.md, source: codebase-exploration).\\nPRIOR ART: Before research/design/review, check vault index from session context. Build on existing notes.\\nTEAMMATES: Need help? SendMessage(to=Neal) with expertise needed. Roster: Mason(architect) Tabitha(data-schema) Porter(devops) Paige(docs-writer) Sage(domain-expert) Sterling(hardware-device) Mira(meta-retro) Nolan(mlops) Cooper(packaging) Blaze(profiler) Chase(qa-engineer) Quinn(qt-qml) Hunter(researcher) Reed(session-manager) Melody(signal-processing) Drew(system-designer) Tessa(testing-strategy) Iris(ui-reviewer) Journey(ux-workflow).\"}}'; fi"
+            "command": "if [ -n \"${ZELLIJ:-}\" ] && ls .brains_in_a_hat/state/active.* &>/dev/null; then INPUT=$(cat); AGENT_NAME=$(echo \"$INPUT\" | jq -r '.name // .agent_type // \"agent\"' 2>/dev/null); ACTIVITY='.brains_in_a_hat/state/activity.jsonl'; PANE_ID=$(zellij action new-pane --floating --name \"$AGENT_NAME\" --close-on-exit -- bash -c \"tail -f '$ACTIVITY' | jq --unbuffered -r 'select(.agent==\\\"$AGENT_NAME\\\") | \\\"\\(.ts) \\(.event): \\(.detail)\\\"'\" 2>/dev/null); [ -n \"$PANE_ID\" ] && echo \"$PANE_ID\" > \".brains_in_a_hat/state/zellij-pane-${AGENT_NAME}.id\"; fi"
+          },
+          {
+            "type": "command",
+            "command": "if ls .brains_in_a_hat/state/active.* &>/dev/null; then printf '{\"hookSpecificOutput\":{\"hookEventName\":\"SubagentStart\",\"additionalContext\":\"PROTOCOLS:\\nLOG: .brains_in_a_hat/state/activity.jsonl (events: start/read/finding/message/done, 3-6/task)\\nNAV: Prefer LSP over Grep for Python.\\nCOMM: Report to Neal via SendMessage. May message teammates by name. Never talk to user directly.\\nTASKS: Check TaskList for assignments. TaskUpdate to claim/complete.\\nIDLE: No work? Stay silent — do not announce yourself.\\nDOMAIN: Read .brains_in_a_hat/domain-config.json if it exists.\\nVAULT: Persist artifacts to ~/.brains_in_a_hat/vault/projects/<project>/ using $CLAUDE_PLUGIN_ROOT/vault-templates/. Flat structure — use type: frontmatter (retro/decision/research/architecture/qa-review) + [[wikilinks]].\\nWIKI: Reference-repo explorations -> ~/.brains_in_a_hat/vault/wiki/<slug>.md (template: wiki.md, source: codebase-exploration).\\nPRIOR ART: Before research/design/review, check vault index from session context. Build on existing notes.\\nTEAMMATES: Need help? SendMessage(to=Neal) with expertise needed. Roster: Mason(architect) Tabitha(data-schema) Porter(devops) Paige(docs-writer) Sage(domain-expert) Sterling(hardware-device) Mira(meta-retro) Nolan(mlops) Cooper(packaging) Blaze(profiler) Chase(qa-engineer) Quinn(qt-qml) Hunter(researcher) Reed(session-manager) Melody(signal-processing) Drew(system-designer) Tessa(testing-strategy) Parker(project-manager) Iris(ui-reviewer) Journey(ux-workflow).\"}}'; fi"
           }
         ]
       }
@@ -55,6 +59,10 @@
           {
             "type": "command",
             "command": "if ls .brains_in_a_hat/state/active.* &>/dev/null; then INPUT=$(cat); AGENT=$(echo \"$INPUT\" | jq -r '.agent_type // \"agent\"'); jq -nc --arg ts \"$(date -Iseconds)\" --arg agent \"$AGENT\" '{ts:$ts,agent:$agent,event:\"done\",detail:\"completed\"}' >> .brains_in_a_hat/state/activity.jsonl 2>/dev/null; fi"
+          },
+          {
+            "type": "command",
+            "command": "if [ -n \"${ZELLIJ:-}\" ] && ls .brains_in_a_hat/state/active.* &>/dev/null; then INPUT=$(cat); AGENT_NAME=$(echo \"$INPUT\" | jq -r '.name // .agent_type // \"agent\"' 2>/dev/null); PANE_FILE=\".brains_in_a_hat/state/zellij-pane-${AGENT_NAME}.id\"; PANE_ID=$(cat \"$PANE_FILE\" 2>/dev/null); if [ -n \"$PANE_ID\" ]; then zellij action rename-pane --pane-id \"$PANE_ID\" \"${AGENT_NAME} [done]\" 2>/dev/null; rm -f \"$PANE_FILE\"; fi; fi"
           }
         ]
       }
@@ -69,7 +77,7 @@
           },
           {
             "type": "command",
-            "command": "if ls .brains_in_a_hat/state/active.* &>/dev/null; then INPUT=$(cat); AGENT=$(echo \"$INPUT\" | jq -r '.tool_input.name // .tool_input.subagent_type // \"agent\"'); STATE=.brains_in_a_hat/state/session-state.json; if [ ! -f \"$STATE\" ]; then echo '{\"spawned_agents\":[],\"last_updated\":\"\"}' > \"$STATE\"; fi; jq --arg agent \"$AGENT\" --arg ts \"$(date -Iseconds)\" '.spawned_agents = (.spawned_agents + [$agent] | unique) | .last_updated = $ts' \"$STATE\" > \"${STATE}.tmp\" && mv \"${STATE}.tmp\" \"$STATE\"; fi"
+            "command": "if ls .brains_in_a_hat/state/active.* &>/dev/null; then INPUT=$(cat); AGENT=$(echo \"$INPUT\" | jq -r '.tool_input.name // .tool_input.subagent_type // \"agent\"'); STATE=.brains_in_a_hat/state/session-state.json; if [ ! -f \"$STATE\" ]; then echo '{\"spawned_agents\":[],\"last_updated\":\"\"}' > \"$STATE\"; fi; jq --arg agent \"$AGENT\" --arg ts \"$(date -Iseconds)\" '.spawned_agents = (.spawned_agents + [$agent] | unique) | .last_updated = $ts' \"$STATE\" > \"${STATE}.tmp.$$\" && mv \"${STATE}.tmp.$$\" \"$STATE\"; fi"
           }
         ]
       }

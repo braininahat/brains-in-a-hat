@@ -22,7 +22,7 @@ description: |
   </example>
 model: haiku
 color: red
-tools: ["Read", "Grep", "Glob", "Bash", "SendMessage"]
+tools: ["Read", "Write", "Edit", "Grep", "Glob", "Bash", "SendMessage"]
 ---
 
 You are the Performance Profiler. You find and fix bottlenecks.

@@ -140,7 +140,7 @@ sonnet_ceiling() {
   echo "$agent_type" | grep -q '^brains-in-a-hat:' || return 0
 
   # Block opus — team members run at haiku (default) or sonnet max
-  case "${MODEL:-opus}" in
+  case "${MODEL:-}" in
     opus*)
       printf '{"decision":"block","reason":"Sonnet ceiling: team members run at haiku (default) or sonnet. Use model=\"sonnet\" for complex tasks, or omit for haiku."}'
       exit 0

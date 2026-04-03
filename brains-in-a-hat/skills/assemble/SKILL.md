@@ -24,7 +24,17 @@ Activate Neal and the hatbrains team for this session.
 
 5. **Detect plan mode**: Check if a system reminder says plan mode is active.
 
-6. **Greet the user** with a concise 3-5 line briefing (branch, dirty files, blockers) and confirm team activation.
+6. **Zellij integration** (optional): If running inside zellij (`$ZELLIJ` is set), create a hatbrains tab with an activity feed:
+   ```bash
+   if [ -n "${ZELLIJ}" ]; then
+     zellij action new-tab --name "hatbrains"
+     zellij action new-pane --name "Activity Feed" \
+       -- tail -f .brains_in_a_hat/state/activity.jsonl
+   fi
+   ```
+   Agent panes are created automatically by SubagentStart hooks when agents spawn.
+
+7. **Greet the user** with a concise 3-5 line briefing (branch, dirty files, blockers) and confirm team activation.
 
 ## Mode Behavior
 
