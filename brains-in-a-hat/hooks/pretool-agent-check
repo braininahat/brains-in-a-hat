@@ -6,7 +6,7 @@
 set -euo pipefail
 
 # ── Guard: team mode must be active ──────────────────────────────────
-[ -f ".brains_in_a_hat/state/active" ] || exit 0
+ls .brains_in_a_hat/state/active.* &>/dev/null || exit 0
 
 INPUT=$(cat)
 PROMPT=$(echo "$INPUT" | jq -r '.tool_input.prompt // empty' 2>/dev/null) || exit 0
@@ -38,12 +38,10 @@ vault_check() {
   pattern=$(echo "$keywords" | tr '\n' '|' | sed 's/|$//')
   [ -n "$pattern" ] || return 0
 
-  # Search current project vault + global wiki only (not other projects)
+  # Search current project vault (flat) + global wiki only
   local search_dirs=()
   for d in "$VAULT_DIR/wiki" \
-           "$VAULT_DIR/projects/$PROJECT/research" \
-           "$VAULT_DIR/projects/$PROJECT/decisions" \
-           "$VAULT_DIR/projects/$PROJECT/architecture"; do
+           "$VAULT_DIR/projects/$PROJECT"; do
     [ -d "$d" ] && search_dirs+=("$d")
   done
   [ "${#search_dirs[@]}" -gt 0 ] || return 0

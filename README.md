@@ -1,6 +1,6 @@
 # brains-in-a-hat
 
-A 19-agent AI software team for Claude Code. Smart routing, auto-CODEOWNERS, self-improvement, and proactive DX suggestions.
+A 20-agent AI software team for Claude Code. Smart routing, auto-CODEOWNERS, self-improvement, and proactive DX suggestions.
 
 ## Install
 
@@ -16,7 +16,7 @@ claude plugins add /path/to/brains-in-a-hat/grant
 
 | Plugin | Purpose |
 |--------|---------|
-| `brains-in-a-hat` | 19-agent dev team — routing, QA, memory, retrospectives |
+| `brains-in-a-hat` | 20-agent dev team — routing, QA, memory, retrospectives |
 | `grant` | Visualization agent — architecture diagrams, git activity, code maps |
 
 ## Team Roster
@@ -51,6 +51,7 @@ claude plugins add /path/to/brains-in-a-hat/grant
 | DevOps | CI/CD, GitHub Actions |
 | Packaging | AppImage, Docker, PyInstaller |
 | Docs Writer | Specs, CLAUDE.md, API docs |
+| Parker | Issues, backlog, milestones, GitHub Projects |
 
 ## Features
 
@@ -63,6 +64,7 @@ claude plugins add /path/to/brains-in-a-hat/grant
 ## Skills
 
 ### brains-in-a-hat
+- `/assemble` — Activate the brains-in-a-hat team (Neal + all agents)
 - `/team-briefing` — Session start briefing: branch status, uncommitted changes, open tasks
 - `/team-debrief` — Session end memory update: save decisions, WIP, workflow changes
 - `/team-retro` — Post-task retrospective: what went well, what to improve
@@ -78,21 +80,21 @@ The dashboard auto-starts via the `session-start` hook each time a Claude Code s
 
 - Runs at `http://localhost:8787` by default
 - Accepts a `?project=<path>` query parameter for multi-project use
-- Logs to `.claude/team/dashboard.log` in the current project
+- Logs to `.brains_in_a_hat/state/dashboard.log` in the current project
 
 ## Configuration
 
 ### User Preferences
 
-Copy `examples/user-preferences.json` to `.claude/team/user-preferences.json` in your project and customize. Controls communication style, tool preferences, engineering principles. The Meta Agent also learns and updates this file over time.
+Copy `examples/user-preferences.json` to `.brains_in_a_hat/user-preferences.json` in your project and customize. Controls communication style, tool preferences, engineering principles. The Meta Agent also learns and updates this file over time.
 
 ### Domain Knowledge
 
-Copy `examples/domain-config.json` to `.claude/team/domain-config.json` and customize for your domain. The included example is for clinical speech-language pathology — replace with your own domain terminology, compliance requirements, and validation rules.
+Copy `examples/domain-config.json` to `.brains_in_a_hat/domain-config.json` and customize for your domain. The included example is for clinical speech-language pathology — replace with your own domain terminology, compliance requirements, and validation rules.
 
 ## Cross-Device / Cross-Account
 
-The plugin lives in a Git repo — install on any device with Claude Code. Project-specific state (memory, CODEOWNERS, retrospectives) stays in each project's `.claude/team/` directory.
+The plugin lives in a Git repo — install on any device with Claude Code. Project-specific config (CODEOWNERS, domain-config) stays in `.brains_in_a_hat/`. Vault artifacts persist globally at `~/.brains_in_a_hat/vault/`.
 
 ## License
 

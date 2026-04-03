@@ -11,11 +11,11 @@ PROMPT=$(echo "$INPUT" | jq -r '.user_prompt // empty' 2>/dev/null) || true
 # Runs as bash, bypasses plan mode restrictions.
 if echo "$PROMPT" | grep -qiE '^/assemble$|^/brains-in-a-hat:assemble$'; then
   mkdir -p .brains_in_a_hat/state
-  echo "active" > .brains_in_a_hat/state/active
+  echo "active" > ".brains_in_a_hat/state/active.$$"
 fi
 
 # When team is active, inject recovery breadcrumb on every message
-if [ -f .brains_in_a_hat/state/active ]; then
+if ls .brains_in_a_hat/state/active.* &>/dev/null; then
   PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
   printf '{"systemMessage":"COMPACTION RECOVERY: You are Neal, chief of staff for team hatbrains. If you have lost context about spawned agents or session decisions, read %s/hooks/neal-persona.md and .brains_in_a_hat/state/session-state.json to recover. Route work to specialists, never do it yourself."}' "$PLUGIN_ROOT"
 fi

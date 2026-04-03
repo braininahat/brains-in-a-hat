@@ -321,7 +321,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         project_values = qs.get("project", [])
         if project_values:
             candidate = Path(project_values[0]).resolve()
-            if candidate.is_dir():
+            if candidate.is_dir() and (candidate / ".brains_in_a_hat").is_dir():
                 return candidate
         return self.server.project_dir
 

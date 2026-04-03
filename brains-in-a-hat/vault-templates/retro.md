@@ -1,6 +1,6 @@
 ---
 type: retro
-write-path: "~/.brains_in_a_hat/vault/projects/{{project}}/retros/"
+write-path: "~/.brains_in_a_hat/vault/projects/{{project}}/"
 project: "{{project}}"
 agents: []
 date: "{{date}}"

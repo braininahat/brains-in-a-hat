@@ -118,7 +118,7 @@ gather_issues() {
 
 gather_memory() {
   local encoded_path
-  encoded_path=$(pwd | sed 's|/|-|g')
+  encoded_path=$(pwd | sed 's|/|--|g')
   local memory_dir="${HOME}/.claude/projects/${encoded_path}/memory/MEMORY.md"
   if [ -f "${memory_dir}" ]; then
     cat "${memory_dir}" 2>/dev/null || echo "No memory"
@@ -141,7 +141,7 @@ gather_vault_state() {
   local project_vault="${VAULT_DIR}/projects/${project_name}"
 
   local retro
-  retro=$(ls -t "${project_vault}/retros/"*.md 2>/dev/null | head -1)
+  retro=$(grep -rl '^type: retro$' "${project_vault}/"*.md 2>/dev/null | xargs ls -t 2>/dev/null | head -1)
   if [ -n "${retro}" ]; then
     printf 'Last retro: %s\n' "$(basename "${retro}")"
     head -5 "${retro}" 2>/dev/null
@@ -159,12 +159,10 @@ gather_pending_proposals() {
   local project_name
   project_name=$(detect_project_name)
   local project_vault="${VAULT_DIR}/projects/${project_name}"
-  local retros_dir="${project_vault}/retros"
-
-  [ -d "${retros_dir}" ] || return 0
+  [ -d "${project_vault}" ] || return 0
 
   local retro_files
-  retro_files=$(ls -t "${retros_dir}/"*.md 2>/dev/null)
+  retro_files=$(grep -rl '^type: retro$' "${project_vault}/"*.md 2>/dev/null | xargs ls -t 2>/dev/null)
   [ -n "${retro_files}" ] || return 0
 
   local escalated=()
@@ -210,13 +208,12 @@ gather_vault_index() {
   local project_name
   project_name=$(detect_project_name)
   local project_vault="${VAULT_DIR}/projects/${project_name}"
+  [ -d "${project_vault}" ] || return 0
   local output=""
 
-  for subdir in decisions research architecture qa-reviews; do
-    local dir="${project_vault}/${subdir}"
-    [ ! -d "${dir}" ] && continue
+  for doc_type in decision research architecture qa-review; do
     local files
-    files=$(ls -t "${dir}/"*.md 2>/dev/null)
+    files=$(grep -rl "^type: ${doc_type}$" "${project_vault}/"*.md 2>/dev/null | xargs ls -t 2>/dev/null)
     [ -z "${files}" ] && continue
 
     local entries=()
@@ -236,7 +233,7 @@ gather_vault_index() {
 
     if [ "${#entries[@]}" -gt 0 ]; then
       local label
-      label=$(echo "${subdir}" | sed 's/-/ /g; s/\b\(.\)/\u\1/g')
+      label=$(echo "${doc_type}" | sed 's/-/ /g; s/\b\(.\)/\u\1/g')
       local joined
       joined=$(printf '%s, ' "${entries[@]}")
       joined="${joined%, }"
