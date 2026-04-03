@@ -1,0 +1,18 @@
+# brains-in-a-hat agent ownership mappings
+# Format: <glob-pattern>  <agent-name>
+# meta-retro updates this file during retrospectives.
+
+*.qml                qt-qml
+*.py                 architect
+*.sql                data-schema
+*.yml                devops
+*.yaml               devops
+*.json               data-schema
+Dockerfile           packaging
+*.spec               packaging
+*.AppImage           packaging
+*.md                 docs-writer
+*.ts                 architect
+*.tsx                architect
+tests/               testing-strategy
+.github/             devops

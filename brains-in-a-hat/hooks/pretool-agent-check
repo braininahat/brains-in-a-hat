@@ -6,7 +6,7 @@
 set -euo pipefail
 
 # ── Guard: team mode must be active ──────────────────────────────────
-[ -f ".brains_in_a_hat/state/active" ] || exit 0
+ls .brains_in_a_hat/state/active.* &>/dev/null || exit 0
 
 INPUT=$(cat)
 PROMPT=$(echo "$INPUT" | jq -r '.tool_input.prompt // empty' 2>/dev/null) || exit 0
@@ -14,7 +14,7 @@ MODEL=$(echo "$INPUT" | jq -r '.tool_input.model // empty' 2>/dev/null) || true
 DESC=$(echo "$INPUT" | jq -r '.tool_input.description // empty' 2>/dev/null) || true
 
 VAULT_DIR="${HOME}/.brains_in_a_hat/vault"
-PROJECT=$(basename "$(pwd)")
+PROJECT=$(gh repo view --json name -q '.name' 2>/dev/null || basename "$(pwd)")
 
 # ── Vault Check (project-scoped + global wiki) ──────────────────────
 
@@ -38,12 +38,10 @@ vault_check() {
   pattern=$(echo "$keywords" | tr '\n' '|' | sed 's/|$//')
   [ -n "$pattern" ] || return 0
 
-  # Search current project vault + global wiki only (not other projects)
+  # Search current project vault (flat) + global wiki only
   local search_dirs=()
   for d in "$VAULT_DIR/wiki" \
-           "$VAULT_DIR/projects/$PROJECT/research" \
-           "$VAULT_DIR/projects/$PROJECT/decisions" \
-           "$VAULT_DIR/projects/$PROJECT/architecture"; do
+           "$VAULT_DIR/projects/$PROJECT"; do
     [ -d "$d" ] && search_dirs+=("$d")
   done
   [ "${#search_dirs[@]}" -gt 0 ] || return 0
@@ -132,8 +130,27 @@ model_check() {
   fi
 }
 
+# ── Sonnet Ceiling ──────────────────────────────────────────────────
+
+sonnet_ceiling() {
+  local agent_type
+  agent_type=$(echo "$INPUT" | jq -r '.tool_input.subagent_type // empty' 2>/dev/null) || true
+
+  # Only enforce for brains-in-a-hat team members
+  echo "$agent_type" | grep -q '^brains-in-a-hat:' || return 0
+
+  # Block opus — team members run at haiku (default) or sonnet max
+  case "${MODEL:-opus}" in
+    opus*)
+      printf '{"decision":"block","reason":"Sonnet ceiling: team members run at haiku (default) or sonnet. Use model=\"sonnet\" for complex tasks, or omit for haiku."}'
+      exit 0
+      ;;
+  esac
+}
+
 # ── Main ─────────────────────────────────────────────────────────────
 
+sonnet_ceiling
 vault_check
 model_check
-# No vault match, no model mismatch — allow silently
+# No ceiling violation, no vault match, no model mismatch — allow silently

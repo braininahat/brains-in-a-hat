@@ -19,7 +19,4 @@ Spawn the `session-manager` agent to produce a session briefing.
 
 If plan mode is active, append to the briefing:
 
-> **Plan mode active** — read-only advisory mode. Plan-safe agents available on demand:
-> Mason, Hunter, Drew, Sage, Tessa, Paige, Reed
->
-> Deferred until plan mode exits: Tabitha, Porter, Sterling, Mira, Nolan, Cooper, Blaze, Chase, Quinn, Melody, Iris, Journey
+> **Plan mode active** — all agents available, tool restrictions inherited automatically.

@@ -1,10 +1,10 @@
 # brains-in-a-hat plugin
 
-Claude Code plugin providing a 19-agent team ("hatbrains") managed by Neal, chief of staff.
+Claude Code plugin providing a 20-agent team ("hatbrains") managed by Neal, chief of staff.
 
 ## Project Structure
 
-- `agents/` — agent definitions (one `.md` per specialist, 19 total)
+- `agents/` — agent definitions (one `.md` per specialist, 20 total)
 - `hooks/` — lifecycle hooks and persona (`hooks.json` wiring, `session-start` bootstrap, `neal-persona.md` brain)
 - `skills/` — user-invocable slash commands (team-briefing, team-debrief, team-retro, team-review, team-cleanup)
 - `vault-templates/` — Obsidian-compatible templates for persistent artifacts (retro, decision, research, architecture, qa-review, patterns, dashboard)
@@ -40,22 +40,13 @@ Dynamic per-task selection — always start cheap, escalate only when needed:
 
 A PreToolUse hook advises when the chosen model looks too expensive for the task.
 
-## Vault Write Paths
+## Vault Structure
 
-Agents persist durable artifacts to `~/.brains_in_a_hat/vault/projects/<project>/<category>/`:
+Flat Obsidian-native vault at `~/.brains_in_a_hat/vault/`:
+- `projects/<project>/` — all project artifacts (flat, no subdirs)
+- `wiki/` — global reusable knowledge (not project-scoped)
 
-| Category | Writers |
-|---|---|
-| `retros/` | session-manager, meta-retro |
-| `decisions/` | domain-expert, session-manager |
-| `research/` | researcher |
-| `architecture/` | architect |
-| `qa-reviews/` | qa-engineer |
-| `wiki/` (global) | researcher, any agent (explore synthesis) |
-
-All vault files use Dataview frontmatter (`type`, `project`, `agents`, `date`, `tags`, `status`) and `[[wikilinks]]`.
-
-Wiki notes live at `~/.brains_in_a_hat/vault/wiki/` (global, not project-scoped) and capture reusable knowledge from web research and reference codebase exploration.
+Files are categorized by `type:` frontmatter (retro, decision, research, architecture, qa-review), not directories. All vault files use Dataview frontmatter (`type`, `project`, `agents`, `date`, `tags`, `status`) and `[[wikilinks]]`.
 
 ## Agent Spawning
 
@@ -63,9 +54,7 @@ Agents are spawned on demand, not at session start. Neal tracks which agents hav
 
 ## Plan Mode
 
-Plan mode restricts file mutations (Write, Edit, destructive Bash). Only 7 plan-safe agents may be spawned (on demand):
-Mason, Hunter, Drew, Sage, Tessa, Paige, Reed.
-The remaining 12 are deferred until plan mode exits.
+Plan mode restricts file mutations (Write, Edit, destructive Bash). All 20 agents are available — they automatically inherit the team lead's mode, so tool restrictions are enforced at the system level.
 
 ## Git Workflow
 

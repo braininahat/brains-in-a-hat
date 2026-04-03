@@ -17,17 +17,9 @@ VAULT_DIR="${HOME}/.brains_in_a_hat/vault"
 STATE_DIR=".brains_in_a_hat/state"
 PROJECT_CONFIG=".brains_in_a_hat"
 
-# ── Project detection ─────────────────────────────────────────────────
+# ── Shared helpers ────────────────────────────────────────────────────
 
-detect_project_name() {
-  local name
-  name=$(gh repo view --json name -q '.name' 2>/dev/null || true)
-  if [ -n "${name}" ]; then
-    printf '%s' "${name}"
-    return
-  fi
-  basename "$(pwd)"
-}
+source "${SCRIPT_DIR}/lib-common.sh"
 
 # ── Dashboard auto-start ─────────────────────────────────────────────
 
@@ -44,9 +36,12 @@ dashboard_start() {
     fi
     nohup ${py_cmd} "${PLUGIN_ROOT}/dashboard/server.py" \
       --project-dir "$(pwd)" > "${STATE_DIR}/dashboard.log" 2>&1 &
-    sleep 1
-    local url
-    url=$(grep -oP 'http://[^ ]+' "${STATE_DIR}/dashboard.log" 2>/dev/null | head -1)
+    local url="" attempts=0
+    while [ -z "$url" ] && [ "$attempts" -lt 5 ]; do
+      sleep 0.5
+      url=$(grep -oP 'http://[^ ]+' "${STATE_DIR}/dashboard.log" 2>/dev/null | head -1)
+      attempts=$((attempts + 1))
+    done
     if [ -n "${url}" ]; then
       (xdg-open "${url}" 2>/dev/null || open "${url}" 2>/dev/null) &
     fi
@@ -58,10 +53,7 @@ dashboard_start() {
 bootstrap_dirs() {
   # Global vault structure
   if [ ! -d "${VAULT_DIR}" ]; then
-    mkdir -p "${VAULT_DIR}/universal/developer"
-    mkdir -p "${VAULT_DIR}/universal/patterns"
-    mkdir -p "${VAULT_DIR}/universal/research"
-    mkdir -p "${VAULT_DIR}/universal/content"
+    mkdir -p "${VAULT_DIR}/universal"
     mkdir -p "${VAULT_DIR}/projects"
   fi
   mkdir -p "${VAULT_DIR}/wiki"
@@ -70,16 +62,11 @@ bootstrap_dirs() {
   mkdir -p "${PROJECT_CONFIG}"
   mkdir -p "${STATE_DIR}"
 
-  # Project vault subdirectory
+  # Project vault (flat — all files use type: frontmatter)
   local project_name
   project_name=$(detect_project_name)
   local project_vault="${VAULT_DIR}/projects/${project_name}"
-  if [ ! -d "${project_vault}" ]; then
-    mkdir -p "${project_vault}/architecture"
-    mkdir -p "${project_vault}/qa-reviews"
-    mkdir -p "${project_vault}/retros"
-    mkdir -p "${project_vault}/decisions"
-  fi
+  mkdir -p "${project_vault}"
 
   # Dashboard note for Obsidian Dataview
   local dashboard_note="${project_vault}/dashboard.md"
@@ -163,9 +150,16 @@ main() {
   # Migrate old state
   migrate_old_state
 
-  # Clear stale session state
-  rm -f "${STATE_DIR}/active"
-  rm -f "${STATE_DIR}/session-state.json"
+  # Clean up stale active flags (PIDs that no longer exist)
+  for pidfile in "${STATE_DIR}"/active.*; do
+    [ -f "$pidfile" ] || continue
+    local pid="${pidfile##*.}"
+    kill -0 "$pid" 2>/dev/null || rm -f "$pidfile"
+  done
+  # Only clear session state if no other session is active
+  if ! ls "${STATE_DIR}"/active.* &>/dev/null; then
+    rm -f "${STATE_DIR}/session-state.json"
+  fi
 
   # Start dashboard (non-blocking)
   dashboard_start

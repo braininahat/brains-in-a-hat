@@ -1,6 +1,6 @@
 ---
 type: architecture
-write-path: "~/.brains_in_a_hat/vault/projects/{{project}}/architecture/"
+write-path: "~/.brains_in_a_hat/vault/projects/{{project}}/"
 project: "{{project}}"
 agents: [architect]
 date: "{{date}}"

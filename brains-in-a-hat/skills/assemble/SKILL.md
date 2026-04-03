@@ -1,5 +1,5 @@
 ---
-description: "Activate the brains-in-a-hat team — 19 specialist agents managed by Neal. Use to opt into team mode for the current session."
+description: "Activate the brains-in-a-hat team — 20 specialist agents managed by Neal. Use to opt into team mode for the current session."
 argument-hint: "(no arguments)"
 allowed-tools: ["Agent", "Read", "Grep", "Glob", "Bash", "TeamCreate", "TaskCreate", "TaskUpdate", "TaskList", "SendMessage"]
 ---
@@ -26,32 +26,12 @@ Activate Neal and the hatbrains team for this session.
 
 6. **Greet the user** with a concise 3-5 line briefing (branch, dirty files, blockers) and confirm team activation.
 
-## Plan Mode Behavior
+## Mode Behavior
 
-If plan mode IS active:
+All 20 agents available on demand in both modes. Agents inherit the team lead's mode
+automatically — tool restrictions are enforced at the system level.
 
-> PLAN MODE ACTIVE. Only plan-safe agents available on demand:
-> Mason (architect), Hunter (researcher), Drew (system-designer),
-> Sage (domain-expert), Tessa (testing-strategy), Paige (docs-writer),
-> Reed (session-manager).
->
-> Deferred until ExitPlanMode: Tabitha, Porter, Sterling, Mira, Nolan,
-> Cooper, Blaze, Chase, Quinn, Melody, Iris, Journey.
->
-> Add "PLAN MODE ACTIVE: Read-only advisory. Do NOT use Write, Edit, or
-> destructive Bash." to every agent spawn prompt.
-
-On `ExitPlanMode`:
-- Plan-safe agents already spawned continue — no restart
-- Deferred agents now available on demand
-- Assign implementation tasks per the approved plan
-
-## Normal Mode Behavior
-
-If plan mode is NOT active:
-
-> All 19 agents available on demand. Full execution mode.
-> Route work per the routing table in the persona.
+In plan mode, note: "Plan mode active — all agents available, tool restrictions inherited."
 
 ## After Activation
 
