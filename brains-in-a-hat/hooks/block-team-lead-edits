@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# PreToolUse hook: block Write/Edit/NotebookEdit/Bash from team lead (parent session).
+# Subagents (identified by transcript_path containing /subagents/agent-*) are allowed.
+# For Bash, whitelist plugin-infrastructure commands.
+set -euo pipefail
+
+ls .brains_in_a_hat/state/active.* &>/dev/null || exit 0
+
+INPUT=$(cat)
+TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null) || exit 0
+TOOL=$(echo "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null) || exit 0
+
+# Subagent → allow
+if echo "$TRANSCRIPT" | grep -qE '/subagents/agent-[^/]+'; then
+  exit 0
+fi
+
+# Bash → whitelist plugin infrastructure
+if [ "$TOOL" = "Bash" ]; then
+  CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null) || exit 0
+  if echo "$CMD" | grep -qE '/brains-in-a-hat/(hooks|skills)/|\.claude/plugins/.+/(hooks|skills)/'; then
+    exit 0
+  fi
+fi
+
+# Parent session — block with actionable reason
+case "$TOOL" in
+  Write|Edit|NotebookEdit)
+    SUGGEST="architect (code) or docs-writer (markdown)" ;;
+  Bash)
+    SUGGEST="devops (Porter: git/ci), project-manager (Parker: gh/issues), qa-engineer (Chase: tests), or the appropriate specialist" ;;
+  *)
+    SUGGEST="the appropriate specialist agent" ;;
+esac
+
+REASON="Team lead must delegate ${TOOL} calls. Spawn ${SUGGEST} via the Agent tool. Escape hatch: rm .brains_in_a_hat/state/active.* to drop team mode."
+
+jq -nc --arg r "$REASON" '{decision:"block", reason:$r}'
+exit 0

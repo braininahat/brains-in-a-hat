@@ -7,10 +7,16 @@ Claude Code lifecycle hooks for the brains-in-a-hat plugin.
 | File | Purpose |
 |------|---------|
 | `hooks.json` | Hook wiring — maps all lifecycle events to their commands |
-| `session-start` | SessionStart script — bootstraps vault/team dirs, starts dashboard, gathers project context, injects Neal persona |
-| `first-prompt-greeting` | UserPromptSubmit script — consumes the greeting flag set by session-start and injects a one-time briefing prompt on the first user message |
+| `session-start` | SessionStart script — bootstraps vault/state dirs, starts dashboard, cleans stale state files. **No persona injection** — that happens via `/assemble` |
+| `first-prompt-greeting` | UserPromptSubmit script — detects `/assemble` activation, refreshes skills caches, injects compaction-recovery breadcrumb + once-per-session missing-skills banner |
 | `neal-persona.md` | Neal's full system prompt — team roster, routing rules, model tiers, plan mode behaviour |
 | `run-hook.cmd` | Cross-platform polyglot wrapper — lets hooks.json use a single command path on both Windows (cmd.exe) and Unix (bash) |
+| `inject-subagent-context` | SubagentStart script — emits PROTOCOLS block plus a precomputed per-agent suffix (RECOMMENDED SKILLS + inline workflow fallbacks for missing skills). Reads from `agent-ctx.cache` built by `refresh-skills-cache` |
+| `refresh-skills-cache` | Scans installed skills once per session, writes three caches: `skills-available.cache`, `skills-missing.cache`, `agent-ctx.cache`. Session-scoped via PID marker |
+| `update-session-state` | PostToolUse[Agent] script — appends spawned agent name to `session-state.json` under a directory-based lock (safe for concurrent sessions) |
+| `block-team-lead-edits` | PreToolUse script — blocks Write, Edit, NotebookEdit, and Bash calls originating from the parent (team-lead) session while team mode is active; subagents pass through freely, and Bash commands inside plugin hooks/skills directories are whitelisted |
+| `pretool-agent-check` | PreToolUse[Agent] script — enforces sonnet ceiling (blocks opus for team members), advises model tier based on task keywords |
+| `lib-common.sh` | Shared helpers (currently `detect_project_name` — resolves project name via gh or pwd basename) |
 
 ## Hook Execution Order
 
@@ -21,48 +27,59 @@ Session opens
 SessionStart ──► session-start (via run-hook.cmd)
                    ├─ Starts dashboard server (non-blocking)
                    ├─ First-run: creates vault dirs, CODEOWNERS, Obsidian config
-                   ├─ Writes greeting flag to /tmp/neal-greeting-<session_id>
+                   ├─ Cleans stale state: active.*, missing-shown.*, skills-cache-built.*,
+                   │                     zellij-pane-*.id files whose PID is dead
                    ├─ Appends session record to ~/.brains_in_a_hat/active-sessions.jsonl
-                   ├─ Loads neal-persona.md
-                   ├─ Gathers: git state, backlog, memory, vault state, vault index,
-                   │           CODEOWNERS, pending retro proposals
-                   └─ Emits JSON { hookEventName, additionalContext } → injected into Neal's prompt
+                   └─ No persona injection (bootstrap only)
 
-User sends first message
+User sends message (any prompt)
     │
     ▼
 UserPromptSubmit ──► first-prompt-greeting
-                       ├─ Checks for /tmp/neal-greeting-<session_id> flag
-                       ├─ If present: removes flag, emits systemMessage asking Neal
-                       │             to greet user and summarise session status (3-5 lines)
-                       └─ If absent (subsequent messages): exits silently
+                       ├─ Detects /assemble — creates .brains_in_a_hat/state/active.<PID>
+                       ├─ When team active: refreshes skills caches (once per session)
+                       ├─ First prompt of session: emits missing-skills banner
+                       │                          (if any expected skills missing)
+                       └─ Every prompt: emits compaction-recovery breadcrumb as
+                                        systemMessage (points to neal-persona.md
+                                        and session-state.json for recovery)
 
 Agent spawned
     │
     ▼
-SubagentStart ──► (inline command, two steps)
-                   ├─ Step 1: appends { ts, agent, event:"start" } to .brains_in_a_hat/state/activity.jsonl
-                   └─ Step 2: injects shared protocols into every agent's context (see below)
+SubagentStart ──► (three steps)
+                   ├─ Step 1: appends { ts, agent, session, event:"start" } to activity.jsonl
+                   ├─ Step 2: (Zellij) opens floating pane tailing agent's activity entries
+                   │          (pane-id file scoped by session PID)
+                   └─ Step 3: inject-subagent-context — emits PROTOCOLS + precomputed suffix
+                              (RECOMMENDED SKILLS + inline fallbacks for missing workflow skills)
 
 Agent completes
     │
     ▼
-SubagentStop ──► (inline command)
-                  └─ Appends { ts, agent, event:"done" } to .brains_in_a_hat/state/activity.jsonl
+SubagentStop ──► (two steps)
+                  ├─ Step 1: appends { ts, agent, session, event:"done" } to activity.jsonl
+                  └─ Step 2: (Zellij) renames pane to "<Agent> [done]", removes pane-id file
 
 Tool call: Agent
     │
     ▼
-PostToolUse[Agent] ──► (inline command)
-                         └─ Appends { ts, agent, event:"spawn", detail:<description> }
-                            to .brains_in_a_hat/state/activity.jsonl
+PostToolUse[Agent] ──► (two steps)
+                         ├─ Step 1: appends { ts, agent, session, event:"spawn", detail } to activity.jsonl
+                         └─ Step 2: update-session-state — locks & updates spawned_agents
+                                    in session-state.json
 
-Tool call: Write
+Tool call: Write/Edit/NotebookEdit/Bash
     │
     ▼
-PreToolUse[Write] ──► (inline command)
-                        └─ Blocks writes whose file_path is inside $CLAUDE_PLUGIN_ROOT
-                           (prevents agents from modifying plugin files)
+PreToolUse[Write] ──► (two commands)
+                        ├─ Blocks writes whose file_path is inside $CLAUDE_PLUGIN_ROOT
+                        │  (prevents agents from modifying plugin files)
+                        └─ block-team-lead-edits — blocks the call if originating from
+                           parent session (subagents pass through; plugin bash whitelisted)
+
+PreToolUse[Edit|NotebookEdit|Bash] ──► block-team-lead-edits
+                        └─ Same parent-session blocking as above
 
 Session closes
     │

@@ -6,7 +6,8 @@ Claude Code plugin providing a 20-agent team ("hatbrains") managed by Neal, chie
 
 - `agents/` — agent definitions (one `.md` per specialist, 20 total)
 - `hooks/` — lifecycle hooks and persona (`hooks.json` wiring, `session-start` bootstrap, `neal-persona.md` brain)
-- `skills/` — user-invocable slash commands (team-briefing, team-debrief, team-retro, team-review, team-cleanup)
+- `commands/` — user-invocable slash commands (team-briefing, team-debrief, team-retro, team-review, team-cleanup)
+- `skills/` — auto-loaded Claude Code skills (`assemble/` — activates the team)
 - `vault-templates/` — Obsidian-compatible templates for persistent artifacts (retro, decision, research, architecture, qa-review, patterns, dashboard)
 - `examples/` — example configs copied on first run (user-preferences.json, domain-config.json)
 - `dashboard/` — global dashboard server (port 8787)
@@ -16,7 +17,7 @@ Claude Code plugin providing a 20-agent team ("hatbrains") managed by Neal, chie
 
 - All file names: kebab-case (`session-manager.md`, `team-briefing`, `qa-review.md`)
 - Agent names in roster: PascalCase single names (`Mason`, `Reed`, `Paige`)
-- Team name: `hatbrains`
+- Team name: `hatbrains-<project>` (e.g., `hatbrains-brains-in-a-hat`) — resolved at runtime via `detect_project_name()` in `hooks/lib-common.sh`
 
 ## Hook Lifecycle Order
 
@@ -27,7 +28,8 @@ Plus tool-level hooks: `PreToolUse`, `PostToolUse`
 ## Key Files
 
 - `hooks/neal-persona.md` — Neal's full prompt: team roster, routing rules, plan mode, model tiers
-- `hooks/session-start` — bootstrap script injecting session context into Neal's prompt
+- `hooks/session-start` — bootstrap script (vault dirs, dashboard, stale-state cleanup); no persona injection — that happens via `/assemble`
+- `hooks/first-prompt-greeting` — detects `/assemble`, creates active flag, injects compaction-recovery breadcrumb
 - `hooks/hooks.json` — hook wiring (all lifecycle events)
 
 ## Model Tiers

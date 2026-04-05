@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# SubagentStart hook: emit PROTOCOLS + precomputed per-agent suffix.
+# Suffix (RECOMMENDED SKILLS + inline fallbacks) is read from agent-ctx.cache,
+# refreshed once per session by refresh-skills-cache.
+set -euo pipefail
+
+ls .brains_in_a_hat/state/active.* &>/dev/null || exit 0
+
+INPUT=$(cat)
+AGENT_TYPE=$(echo "$INPUT" | jq -r '.agent_type // empty' 2>/dev/null) || AGENT_TYPE=""
+AGENT_TYPE="${AGENT_TYPE#brains-in-a-hat:}"
+
+# Refresh caches if stale (idempotent, no-op when fresh)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+bash "${SCRIPT_DIR}/refresh-skills-cache" 2>/dev/null || true
+
+# Lookup precomputed suffix for this agent type
+SUFFIX=""
+CTX_CACHE=".brains_in_a_hat/state/agent-ctx.cache"
+if [ -f "$CTX_CACHE" ] && [ -n "$AGENT_TYPE" ]; then
+  SUFFIX=$(jq -r --arg t "$AGENT_TYPE" '.[$t] // ""' "$CTX_CACHE" 2>/dev/null) || SUFFIX=""
+fi
+
+PROTOCOLS='PROTOCOLS:
+LOG: .brains_in_a_hat/state/activity.jsonl (events: start/read/finding/message/done, 3-6/task)
+NAV: Prefer LSP over Grep for Python.
+COMM: Report to Neal via SendMessage. May message teammates by name. Never talk to user directly.
+TASKS: Check TaskList for assignments. TaskUpdate to claim/complete.
+IDLE: No work? Stay silent — do not announce yourself.
+DOMAIN: Read .brains_in_a_hat/domain-config.json if it exists.
+VAULT: Persist artifacts to ~/.brains_in_a_hat/vault/projects/<project>/ using $CLAUDE_PLUGIN_ROOT/vault-templates/. Flat structure — use type: frontmatter (retro/decision/research/architecture/qa-review) + [[wikilinks]].
+WIKI: Reference-repo explorations -> ~/.brains_in_a_hat/vault/wiki/<slug>.md (template: wiki.md, source: codebase-exploration).
+PRIOR ART: Before research/design/review, check vault index from session context. Build on existing notes.
+TEAMMATES: Need help? SendMessage(to=Neal) with expertise needed. Roster: Mason(architect) Tabitha(data-schema) Porter(devops) Paige(docs-writer) Sage(domain-expert) Sterling(hardware-device) Mira(meta-retro) Nolan(mlops) Cooper(packaging) Blaze(profiler) Chase(qa-engineer) Quinn(qt-qml) Hunter(researcher) Reed(session-manager) Melody(signal-processing) Drew(system-designer) Tessa(testing-strategy) Parker(project-manager) Iris(ui-reviewer) Journey(ux-workflow).'
+
+CTX="${PROTOCOLS}${SUFFIX}"
+
+jq -nc --arg ctx "$CTX" '{hookSpecificOutput:{hookEventName:"SubagentStart", additionalContext:$ctx}}'
+exit 0
