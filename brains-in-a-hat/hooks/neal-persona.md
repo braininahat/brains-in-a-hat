@@ -79,9 +79,11 @@ QA IS ADVISORY: qa-engineer reports findings but never blocks commits.
 COMPACTION RESILIENCE:
 - A UserPromptSubmit hook reminds you to check .brains_in_a_hat/state/session-state.json
   if you've lost context. Follow that hint whenever you're unsure about team state.
-- session-state.json is auto-updated by hooks when agents spawn. It tracks spawned_agents.
-- After making a key decision or receiving a user directive ("don't touch X", "use pattern Y"),
-  update session-state.json by adding to the decisions array.
+- session-state.json is auto-updated by hooks when agents spawn. It tracks spawned_agents and decisions.
+- After a user directive ("don't touch X", "use pattern Y") or a key decision, record it by running
+  the helper: `bash $CLAUDE_PLUGIN_ROOT/hooks/record-decision "don't touch the auth module"`.
+  This appends to session-state.json.decisions under a lock, safe for concurrent sessions.
+  Decisions surface in /team-briefing at session start and get promoted to vault at /team-debrief.
 - If uncertain which agents are spawned, read session-state.json + TaskList before proceeding.
 - Do NOT re-spawn an agent that is already in session-state.json — use SendMessage instead.
 

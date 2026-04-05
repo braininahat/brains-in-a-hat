@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # UserPromptSubmit hook:
 # 1. Detect /assemble command and create activation flag (works in plan mode)
-# 2. When team is active, inject compaction recovery breadcrumb (~50 tokens)
+# 2. When team is active, refresh skills caches (session-scoped)
+# 3. On first prompt of session, emit missing-skills banner (once per session)
+# 4. On every prompt, inject compaction recovery breadcrumb (~50 tokens)
 set -euo pipefail
 
 INPUT=$(cat)
@@ -14,10 +16,32 @@ if echo "$PROMPT" | grep -qiE '^/assemble$|^/brains-in-a-hat:assemble$'; then
   echo "active" > ".brains_in_a_hat/state/active.$$"
 fi
 
-# When team is active, inject recovery breadcrumb on every message
+# When team is active, refresh caches + emit breadcrumb
 if ls .brains_in_a_hat/state/active.* &>/dev/null; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+  bash "${SCRIPT_DIR}/refresh-skills-cache" 2>/dev/null || true
+
+  # Resolve project-scoped team name (e.g., "hatbrains-brains-in-a-hat")
+  source "${SCRIPT_DIR}/lib-common.sh"
+  PROJECT=$(detect_project_name 2>/dev/null || echo "unknown")
+  TEAM_NAME="hatbrains-${PROJECT}"
+
+  # Once-per-session: missing-skills banner (marker tied to session PID)
+  ACTIVE_FILE=$(ls -t .brains_in_a_hat/state/active.* 2>/dev/null | head -1)
+  SESSION_ID="${ACTIVE_FILE##*/active.}"
+  MARKER=".brains_in_a_hat/state/missing-shown.${SESSION_ID}"
+  BANNER=""
+  if [ ! -f "$MARKER" ]; then
+    touch "$MARKER"
+    if [ -s ".brains_in_a_hat/state/skills-missing.cache" ]; then
+      MISSING=$(tr '\n' ' ' < .brains_in_a_hat/state/skills-missing.cache | xargs)
+      BANNER=" Missing expected skills: ${MISSING}. Agents will use inline fallbacks (see cache: .brains_in_a_hat/state/skills-missing.cache)."
+    fi
+  fi
+
   PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
-  printf '{"systemMessage":"COMPACTION RECOVERY: You are Neal, chief of staff for team hatbrains. If you have lost context about spawned agents or session decisions, read %s/hooks/neal-persona.md and .brains_in_a_hat/state/session-state.json to recover. Route work to specialists, never do it yourself."}' "$PLUGIN_ROOT"
+  MSG=$(printf 'COMPACTION RECOVERY: You are Neal, chief of staff for team %s. If you have lost context about spawned agents or session decisions, read %s/hooks/neal-persona.md and .brains_in_a_hat/state/session-state.json to recover. Route work to specialists, never do it yourself.%s' "$TEAM_NAME" "$PLUGIN_ROOT" "$BANNER")
+  jq -nc --arg m "$MSG" '{systemMessage:$m}'
 fi
 
 exit 0

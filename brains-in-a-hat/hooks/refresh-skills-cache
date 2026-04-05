@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# Refresh session-scoped skills caches. Idempotent.
+# Caches are fresh if newer than the current session's active.* file.
+# Writes three caches:
+#   skills-available.cache  — installed skills (basenames, one per line)
+#   skills-missing.cache    — expected candidates not installed
+#   agent-ctx.cache         — per-agent-type precomputed suffix (JSON)
+set -euo pipefail
+
+STATE_DIR=".brains_in_a_hat/state"
+AVAIL_CACHE="${STATE_DIR}/skills-available.cache"
+MISSING_CACHE="${STATE_DIR}/skills-missing.cache"
+CTX_CACHE="${STATE_DIR}/agent-ctx.cache"
+
+# Only refresh when team is active
+ls "${STATE_DIR}"/active.* &>/dev/null || exit 0
+
+# Per-session build marker (tied to the current session's active.* PID).
+# If marker exists AND all three caches exist → already built this session.
+ACTIVE_FILE=$(ls -t "${STATE_DIR}"/active.* 2>/dev/null | head -1)
+SESSION_ID="${ACTIVE_FILE##*/active.}"
+BUILD_MARKER="${STATE_DIR}/skills-cache-built.${SESSION_ID}"
+
+if [ -f "$BUILD_MARKER" ] && [ -f "$AVAIL_CACHE" ] && [ -f "$MISSING_CACHE" ] && [ -f "$CTX_CACHE" ]; then
+  exit 0
+fi
+
+mkdir -p "$STATE_DIR"
+
+# ── Candidates per agent type (authoritative) ───────────────────────
+candidates_for() {
+  case "$1" in
+    ui-reviewer|ux-workflow) echo "polish audit critique arrange typeset frontend-design dogfood" ;;
+    qa-engineer|testing-strategy) echo "dogfood webapp-testing verification-before-completion TDD" ;;
+    architect|system-designer) echo "writing-plans brainstorming systematic-debugging" ;;
+    researcher) echo "deep-research academic-paper academic-paper-reviewer" ;;
+    docs-writer) echo "academic-paper teach-impeccable distill" ;;
+    profiler) echo "systematic-debugging" ;;
+    devops) echo "using-git-worktrees executing-plans" ;;
+    mlops|signal-processing|qt-qml|hardware-device) echo "TDD systematic-debugging" ;;
+    data-schema) echo "systematic-debugging" ;;
+    *) echo "writing-plans executing-plans" ;;
+  esac
+}
+
+# Fallback text per missing structural-workflow skill
+fallback_for() {
+  case "$1" in
+    writing-plans) echo "PLAN-STRUCTURE: Context > Approach > Files Changed > Verification. Keep concise, scannable." ;;
+    systematic-debugging) echo "DEBUG-STRUCTURE: Observe > Hypothesize > Test > Narrow. Don't guess — instrument." ;;
+    TDD) echo "TDD: Red > Green > Refactor. Failing test first, make it pass, then clean." ;;
+    verification-before-completion) echo "VERIFY-DONE: Before saying done — run tests, read diff, confirm no regressions." ;;
+    brainstorming) echo "BRAINSTORM: Generate 3+ options before picking. For each: cost, risk, tradeoff." ;;
+  esac
+}
+
+# Concrete agent types (drives per-agent precomputation)
+AGENT_TYPES="architect data-schema devops docs-writer domain-expert hardware-device meta-retro mlops packaging profiler project-manager qa-engineer qt-qml researcher session-manager signal-processing system-designer testing-strategy ui-reviewer ux-workflow"
+
+# ── 1. skills-available.cache ──────────────────────────────────────
+{
+  for root in "${HOME}/.claude/plugins/marketplaces" "${HOME}/.claude/plugins/cache"; do
+    [ -d "$root" ] || continue
+    find "$root" -type d -name skills -prune 2>/dev/null | while read -r sd; do
+      find "$sd" -mindepth 1 -maxdepth 1 -type d 2>/dev/null -exec basename {} \;
+    done
+  done
+} | sort -u > "${AVAIL_CACHE}.tmp.$$" 2>/dev/null
+mv "${AVAIL_CACHE}.tmp.$$" "$AVAIL_CACHE" 2>/dev/null || { rm -f "${AVAIL_CACHE}.tmp.$$"; exit 1; }
+
+# ── 2. skills-missing.cache = union(candidates) - installed ────────
+UNIQUE=""
+for at in $AGENT_TYPES; do
+  UNIQUE="$UNIQUE $(candidates_for "$at")"
+done
+echo "$UNIQUE" | tr ' ' '\n' | sort -u | grep -v '^$' | while read -r skill; do
+  grep -qxF "$skill" "$AVAIL_CACHE" 2>/dev/null || echo "$skill"
+done > "${MISSING_CACHE}.tmp.$$"
+mv "${MISSING_CACHE}.tmp.$$" "$MISSING_CACHE" 2>/dev/null || rm -f "${MISSING_CACHE}.tmp.$$"
+
+# ── 3. agent-ctx.cache: per-agent precomputed suffix (JSON) ────────
+TMP_JSON="${CTX_CACHE}.tmp.$$"
+echo "{}" > "$TMP_JSON"
+for at in $AGENT_TYPES; do
+  CANDS=$(candidates_for "$at")
+  AVAIL="" MISS=""
+  for s in $CANDS; do
+    if grep -qxF "$s" "$AVAIL_CACHE" 2>/dev/null; then
+      AVAIL="$AVAIL $s"
+    else
+      MISS="$MISS $s"
+    fi
+  done
+  AVAIL=$(echo "$AVAIL" | xargs)
+  MISS=$(echo "$MISS" | xargs)
+
+  SUFFIX=""
+  [ -n "$AVAIL" ] && SUFFIX="${SUFFIX}
+RECOMMENDED SKILLS: ${AVAIL}"
+  for s in $MISS; do
+    FB=$(fallback_for "$s")
+    [ -n "$FB" ] && SUFFIX="${SUFFIX}
+${FB}"
+  done
+
+  jq --arg k "$at" --arg v "$SUFFIX" '. + {($k): $v}' "$TMP_JSON" > "${TMP_JSON}.2" && mv "${TMP_JSON}.2" "$TMP_JSON"
+done
+mv "$TMP_JSON" "$CTX_CACHE" 2>/dev/null || rm -f "$TMP_JSON"
+
+touch "$BUILD_MARKER"
+exit 0

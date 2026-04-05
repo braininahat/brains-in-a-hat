@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Update session-state.json atomically with a directory-based lock.
+# Reads stdin JSON (Claude Code tool-use input), extracts agent name,
+# appends to spawned_agents, updates last_updated. Safe under concurrent sessions.
+set -euo pipefail
+
+# Only update when team is active
+ls .brains_in_a_hat/state/active.* &>/dev/null || exit 0
+
+INPUT=$(cat)
+AGENT=$(echo "$INPUT" | jq -r '.tool_input.name // .tool_input.subagent_type // "agent"' 2>/dev/null) || exit 0
+[ -z "$AGENT" ] || [ "$AGENT" = "null" ] && exit 0
+
+STATE=".brains_in_a_hat/state/session-state.json"
+LOCK="${STATE}.lock.d"
+
+# Acquire lock: mkdir is atomic on POSIX filesystems. Retry 5x with 100ms backoff.
+acquired=0
+for _ in 1 2 3 4 5; do
+  if mkdir "$LOCK" 2>/dev/null; then
+    acquired=1
+    break
+  fi
+  sleep 0.1
+done
+
+# Couldn't acquire lock — state-update failure is non-fatal (agent still runs)
+[ "$acquired" = "1" ] || exit 0
+
+# Ensure lock is removed even on script failure
+trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+
+# Initialize state file if absent
+[ -f "$STATE" ] || echo '{"spawned_agents":[],"decisions":[],"last_updated":""}' > "$STATE"
+# Ensure decisions field exists in older state files
+jq 'if has("decisions") then . else . + {decisions:[]} end' "$STATE" > "${STATE}.tmp.$$" && mv "${STATE}.tmp.$$" "$STATE"
+
+# Read-modify-write (now safe under lock)
+jq --arg agent "$AGENT" --arg ts "$(date -Iseconds)" \
+  '.spawned_agents = (.spawned_agents + [$agent] | unique) | .last_updated = $ts' \
+  "$STATE" > "${STATE}.tmp.$$" && mv "${STATE}.tmp.$$" "$STATE"
+
+exit 0
