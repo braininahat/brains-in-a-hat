@@ -22,6 +22,9 @@ vault_check() {
   [ -d "$VAULT_DIR" ] || return 0
   [ -n "$PROMPT" ] || return 0
 
+  # Bypass: if prompt explicitly declares vault was reviewed, skip check
+  echo "$PROMPT" | grep -qF '[vault-reviewed]' && return 0
+
   # Stopwords: common English + agent prompt boilerplate + generic technical terms
   local stopwords="the a an is are was were be been being have has had do does did will would shall should may might can could of in to for on with at by from as into through during before after above below between your you this that these those it its and or but not no nor so yet also very just only even still already when what which who whom how where why each every all any few more most other some such than too much many well here there then now team hatbrains agent role task rules findings neal sendmessage spawn spawned message report completed work done active mode plan read write edit using use used make keep send via research code data model system project file feature config class function method check based type name output input new should need current state"
 
