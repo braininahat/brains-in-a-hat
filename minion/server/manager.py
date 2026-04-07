@@ -17,20 +17,47 @@ import httpx
 
 from .models import ModelDef, QuantVariant
 
-LLAMA_SERVER = Path("/home/varun/repos/personal/llama.cpp/build/bin/llama-server")
+def _find_llama_server() -> Path:
+    """Find llama-server binary, preferring ik_llama.cpp over mainline.
+
+    Search order:
+      1. Local ik_llama.cpp builds (best performance, Hadamard KV support)
+      2. Local mainline llama.cpp builds
+      3. PATH (brew, system install, user symlinks)
+    """
+    home = Path.home()
+    # Local builds — ik_llama.cpp first, then mainline
+    for candidate in [
+        home / "repos/personal/ik_llama.cpp/build/bin/llama-server",
+        home / "ik_llama.cpp/build/bin/llama-server",
+        home / "repos/personal/llama.cpp/build/bin/llama-server",
+        home / "llama.cpp/build/bin/llama-server",
+    ]:
+        if candidate.exists():
+            return candidate
+    # Fall back to PATH
+    import shutil
+    which = shutil.which("llama-server")
+    if which:
+        return Path(which)
+    return Path("llama-server")
+
+
+LLAMA_SERVER = _find_llama_server()
 
 
 @dataclass
 class ServerConfig:
     model: ModelDef
     quant: QuantVariant
-    kv_type: str        # e.g. "bf16", "q8_0"
+    kv_type: str        # e.g. "bf16", "q8_0", "q4_0"
     gpu_only: bool      # False → add -nkvo, more threads
     context: str        # "auto", "32k", "64k", ...
     flash: str          # "on" / "off"
     cuda: str           # "on" / "off"  (GGML_CUDA_GRAPH_OPT)
     cpu_moe: str        # "on" / "off"
     port: int
+    hadamard_kv: bool = True  # Hadamard transforms for K/V cache (ik_llama.cpp)
 
 
 class ServerManager:
@@ -61,26 +88,24 @@ class ServerManager:
         return True, None
 
     def build_args(self) -> list[str]:
-        """Build complete llama-server argv as a list (no shell interpolation)."""
+        """Build complete llama-server argv as a list (no shell interpolation).
+
+        Targets ik_llama.cpp (ikawrakow fork) with Hadamard KV transforms,
+        auto-fit tensor offloading, and improved MoE performance.
+        """
         cfg = self.config
         args: list[str] = [str(LLAMA_SERVER)]
 
-        # Model source: local HF cache → llama.cpp cache → HF download
+        # Model source: local HF cache → HF download
         local_path = Path(cfg.quant.local_path)
-        llama_cache = (
-            Path.home() / ".cache" / "llama.cpp"
-            / f"unsloth_{cfg.model.hf_repo.replace('/', '_')}_{cfg.quant.hf_file}"
-        )
         if local_path.exists():
             args += ["-m", str(local_path)]
-        elif llama_cache.exists():
-            args += ["-m", str(llama_cache)]
         else:
             args += ["-hf", cfg.model.hf_repo, "-hff", cfg.quant.hf_file]
 
-        # Context
+        # Context — ik_llama.cpp uses -c 0 for auto-sizing
         if cfg.context == "auto":
-            args += ["-c", "0", "-fitc", "8192"]
+            args += ["-c", "0"]
         else:
             ctx_map = {
                 "32k": 32768, "64k": 65536, "96k": 98304,
@@ -93,6 +118,7 @@ class ServerManager:
         args += [
             "--host", "0.0.0.0",
             "--port", str(cfg.port),
+            "-ngl", "999",
             "-t", str(threads),
             "-tb", str(threads),
             "-b", "2048",
@@ -102,14 +128,13 @@ class ServerManager:
             "-ctk", cfg.kv_type,
             "-ctv", cfg.kv_type,
             "--jinja",
-            "--temp", str(cfg.model.temp),
-            "--top-p", str(cfg.model.top_p),
-            "--top-k", str(cfg.model.top_k),
-            "--min-p", str(cfg.model.min_p),
-            "--cont-batching",
             "--mlock",
             "--metrics",
         ]
+
+        # Hadamard transforms for KV cache (ik_llama.cpp feature)
+        if cfg.hadamard_kv:
+            args += ["-khad", "-vhad"]
 
         if not cfg.gpu_only:
             args.append("-nkvo")
@@ -122,8 +147,8 @@ class ServerManager:
         if cfg.cpu_moe == "on":
             args.append("--cpu-moe")
 
-        # Auto-fitter must come last
-        args += ["-fitt", "512"]
+        # ik_llama.cpp auto-fit tensor offloading
+        args.append("--fit")
 
         return args
 
