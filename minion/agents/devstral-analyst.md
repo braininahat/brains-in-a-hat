@@ -19,3 +19,10 @@ Rules:
 - If asked to assess a problem, enumerate concrete evidence for and against each hypothesis.
 - Do not suggest fixes unless explicitly asked. Analysis and implementation are separate concerns.
 - If a file is too large to read fully, use offset/limit to sample relevant sections, and note what was not examined.
+
+Strategy:
+- Start broad (glob/ls to find relevant files), then narrow (read specific sections).
+- Use grep to find specific patterns instead of reading entire files.
+- Read only the sections you need — use offset/limit for large files.
+- Stop calling tools as soon as you have enough evidence to answer. Write your findings immediately.
+- NEVER read files just because they exist. Only read what directly answers the question.

@@ -261,7 +261,7 @@ async def ask_devstral_agent(
     system: str = "You are a coding assistant with access to the codebase. Use the available tools to explore files before answering. Be thorough but concise.",
     persona: str = "",
     max_tokens: int = 4096,
-    max_iterations: int = 10,
+    max_iterations: int = 12,
 ) -> str:
     """Run Devstral as an agent with read-only codebase tools.
 
@@ -280,22 +280,37 @@ async def ask_devstral_agent(
     if context:
         system = f"{context}\n\n---\n\n{system}"
 
+    # Inject iteration budget awareness
+    system += (
+        f"\n\nYou have a maximum of {max_iterations} tool-call rounds. "
+        f"Budget carefully: read only what you need, then stop calling tools "
+        f"and write your complete answer. Do not spend all rounds reading — "
+        f"reserve at least 2 rounds for your final response."
+    )
+
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": prompt},
     ]
+    tool_call_count = 0
     tool_trace: list[str] = []  # human-readable trace of tool calls
 
     async with httpx.AsyncClient() as client:
         for iteration in range(max_iterations):
+            # On the last iteration, withhold tools to force text synthesis
+            use_tools = iteration < max_iterations - 1
+
+            request_body: dict = {
+                "model": "devstral",
+                "messages": messages,
+                "max_tokens": max_tokens,
+            }
+            if use_tools:
+                request_body["tools"] = AGENT_TOOLS
+
             resp = await client.post(
                 DEVSTRAL_URL,
-                json={
-                    "model": "devstral",
-                    "messages": messages,
-                    "tools": AGENT_TOOLS,
-                    "max_tokens": max_tokens,
-                },
+                json=request_body,
                 timeout=120.0,
             )
             resp.raise_for_status()
@@ -307,14 +322,13 @@ async def ask_devstral_agent(
                 answer = msg.get("content", "")
                 if tool_trace:
                     trace_block = "\n".join(tool_trace)
-                    return f"{answer}\n\n---\n**Tool trace** ({len(tool_trace)} calls):\n{trace_block}"
+                    return f"{answer}\n\n---\n**Tool trace** ({tool_call_count} calls):\n{trace_block}"
                 return answer
 
             for tc in tool_calls:
                 fn = tc.get("function", {})
                 fn_name = fn.get("name", "?")
                 fn_args = fn.get("arguments", "")
-                # Parse args for a compact summary
                 try:
                     args_dict = json.loads(fn_args) if isinstance(fn_args, str) else fn_args
                 except (json.JSONDecodeError, TypeError):
@@ -325,17 +339,26 @@ async def ask_devstral_agent(
                 result = _execute_tool(tc, cwd)
                 result_preview = result[:120].replace("\n", " ") + ("..." if len(result) > 120 else "")
                 tool_trace.append(f"       → {result_preview}")
+                tool_call_count += 1
                 messages.append({
                     "role": "tool",
                     "content": result,
                     "tool_call_id": tc.get("id", ""),
                 })
 
+            # Inject countdown into the last tool result when running low
+            remaining = max_iterations - iteration - 1
+            if remaining <= 3 and remaining > 0 and messages[-1]["role"] == "tool":
+                messages[-1]["content"] += (
+                    f"\n\n[{remaining} iteration(s) remaining — "
+                    f"stop reading and write your answer now.]"
+                )
+
     last = messages[-1]
     answer = last.get("content", f"Agent reached {max_iterations} iterations without a final answer.")
     if tool_trace:
         trace_block = "\n".join(tool_trace)
-        return f"{answer}\n\n---\n**Tool trace** ({len(tool_trace) // 2} calls):\n{trace_block}"
+        return f"{answer}\n\n---\n**Tool trace** ({tool_call_count} calls):\n{trace_block}"
     return answer
 
 

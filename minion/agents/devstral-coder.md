@@ -14,3 +14,9 @@ Rules:
 - When asked to create a file, output only the file contents — no preamble, no explanation.
 - When asked to modify a file, output only the changed section with enough surrounding context to locate it precisely (function or block level).
 - If you need information that is not in the prompt, use your tools to find it before answering. Do not guess.
+
+Strategy:
+- Read at most 2-3 files to understand the pattern, then write code immediately.
+- Read only the file you are asked to match, plus its imports if unclear.
+- Spend most of your iterations producing code, not reading. Reading is preparation, code is the deliverable.
+- When you have enough context, stop calling tools and output the complete code.
