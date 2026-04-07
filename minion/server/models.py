@@ -60,6 +60,13 @@ MODELS: list[ModelDef] = [
                 hf_file="mistralai_Devstral-Small-2-24B-Instruct-2512-Q4_K_M.gguf",
             ),
             QuantVariant(
+                id="IQ4_NL",
+                label="IQ4_NL (~13 GB)",
+                size_gb=13.0,
+                local_path=f"{_HOME}/.cache/huggingface/gguf/mistralai_Devstral-Small-2-24B-Instruct-2512-IQ4_NL.gguf",
+                hf_file="mistralai_Devstral-Small-2-24B-Instruct-2512-IQ4_NL.gguf",
+            ),
+            QuantVariant(
                 id="Q5_K_M",
                 label="Q5_K_M (~15.6 GB)",
                 size_gb=15.6,
