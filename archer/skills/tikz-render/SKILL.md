@@ -1,7 +1,6 @@
 ---
 name: tikz-render
 description: This skill should be used when the user wants to "render a TikZ diagram", "compile LaTeX to SVG", "create an architecture diagram", "draw a neural network figure", "convert .tex to SVG", "use PetarV diagrams", "use nntikz", or asks to draw any specific architecture (BiGRU, BiMamba, JEPA, KAN, CTC trellis, ST-GCN, transformer, LSTM, ResNet). Handles both inline TikZ snippets and full .tex files. Outputs clean SVG files suitable for papers and dashboards.
-allowed-tools: Bash, Read, Write
 ---
 
 # TikZ → SVG Compiler

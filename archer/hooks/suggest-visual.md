@@ -1,6 +1,7 @@
 ---
 event: PostToolUse
-tool: Write
+tools:
+  - Write
 ---
 
 Check if the file just written is a model definition or training config that would benefit from visualization:
