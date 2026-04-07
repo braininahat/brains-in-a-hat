@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# devstral-advisor: advisory hook — suggests ask_devstral_agent for source files.
+# Never blocks. Only fires when minion is active.
+# Input: JSON on stdin with tool_name and tool_input fields.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib.sh"
+
+# Only advise when minion is active
+if ! is_active; then
+    exit 0
+fi
+
+# Parse input with jq; if jq unavailable, exit silently
+if ! command -v jq &>/dev/null; then
+    exit 0
+fi
+
+input="$(cat)"
+tool_name="$(echo "$input" | jq -r '.tool_name // ""' 2>/dev/null || echo "")"
+
+# Source code file extensions we want to advise on
+SOURCE_EXTS='\.(py|ts|tsx|js|jsx|rs|go|cpp|cc|c|h|hpp|java|kt|swift|rb|cs|sh|bash)$'
+
+should_advise=0
+
+case "$tool_name" in
+    Write|Edit|NotebookEdit)
+        file_path="$(echo "$input" | jq -r '.tool_input.file_path // .tool_input.path // ""' 2>/dev/null || echo "")"
+        if echo "$file_path" | grep -qP "$SOURCE_EXTS"; then
+            should_advise=1
+        fi
+        ;;
+    Bash)
+        command="$(echo "$input" | jq -r '.tool_input.command // ""' 2>/dev/null || echo "")"
+        # Advise if the bash command is writing to a source file (redirect to source ext)
+        if echo "$command" | grep -qP ">\s*\S+${SOURCE_EXTS}"; then
+            should_advise=1
+        fi
+        ;;
+esac
+
+if [[ "$should_advise" == "1" ]]; then
+    echo '{"hookSpecificOutput":{"additionalContext":"Minion is active. Consider delegating this code generation task to Devstral via ask_devstral_agent — it can read the codebase and produce the implementation. You can still proceed directly if preferred."}}'
+fi
+
+exit 0

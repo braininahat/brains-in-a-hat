@@ -1,0 +1,1 @@
+{"mcpServers":{"devstral":{"command":"uv","args":["run","--script","${CLAUDE_PLUGIN_ROOT}/mcp/devstral-mcp.py"]}}}
