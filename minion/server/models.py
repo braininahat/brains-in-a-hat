@@ -17,8 +17,9 @@ from pathlib import Path
 
 _HOME = os.path.expanduser("~")
 
-# Chat template lives in the agent-server repo alongside the GGUF cache
-_DEVSTRAL_CHAT_TEMPLATE = f"{_HOME}/repos/personal/agent-server/devstral-chat-template.jinja"
+# Chat template — check ~/.minion/ then fall back to None (use model default)
+_DEVSTRAL_CHAT_TEMPLATE_PATH = f"{_HOME}/.minion/devstral-chat-template.jinja"
+_DEVSTRAL_CHAT_TEMPLATE = _DEVSTRAL_CHAT_TEMPLATE_PATH if os.path.exists(_DEVSTRAL_CHAT_TEMPLATE_PATH) else None
 
 
 @dataclass
