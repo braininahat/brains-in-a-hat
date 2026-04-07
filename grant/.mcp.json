@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "grant": {
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/server/dist/index.cjs"]
-    }
-  }
-}
