@@ -17,7 +17,33 @@ import httpx
 
 from .models import ModelDef, QuantVariant
 
-LLAMA_SERVER = Path("/home/varun/repos/personal/ik_llama.cpp/build/bin/llama-server")
+def _find_llama_server() -> Path:
+    """Find llama-server binary, preferring ik_llama.cpp over mainline.
+
+    Search order:
+      1. Local ik_llama.cpp builds (best performance, Hadamard KV support)
+      2. Local mainline llama.cpp builds
+      3. PATH (brew, system install, user symlinks)
+    """
+    home = Path.home()
+    # Local builds — ik_llama.cpp first, then mainline
+    for candidate in [
+        home / "repos/personal/ik_llama.cpp/build/bin/llama-server",
+        home / "ik_llama.cpp/build/bin/llama-server",
+        home / "repos/personal/llama.cpp/build/bin/llama-server",
+        home / "llama.cpp/build/bin/llama-server",
+    ]:
+        if candidate.exists():
+            return candidate
+    # Fall back to PATH
+    import shutil
+    which = shutil.which("llama-server")
+    if which:
+        return Path(which)
+    return Path("llama-server")
+
+
+LLAMA_SERVER = _find_llama_server()
 
 
 @dataclass
