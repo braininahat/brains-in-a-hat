@@ -318,11 +318,26 @@ async def ask_devstral_agent(
 
 
 @mcp.tool()
-async def ensure_server() -> str:
+async def ensure_server(
+    model_id: str | None = None,
+    quant_id: str | None = None,
+    context: int = 32768,
+    kv_type: str = "bf16",
+) -> str:
     """Check if llama-server is healthy on localhost:8000. Auto-spawns with optimal config if not.
 
-    Uses nvidia-smi to detect free VRAM and selects the best Devstral quant + KV config.
-    Returns a status string with model info.
+    Detects free VRAM, checks which model files are cached locally, estimates
+    KV cache overhead, and selects the best config that fits. Never picks a
+    quant that isn't locally cached (avoids multi-GB download timeouts).
+
+    Args:
+        model_id: Override model selection (e.g. "devstral", "qwen35"). Auto-selects if None.
+        quant_id: Override quant selection (e.g. "Q4_K_XL", "Q5_K_XL"). Auto-selects if None.
+        context: Target context length in tokens (default 32768).
+        kv_type: KV cache dtype — "bf16", "f16", "q8_0", or "q4_0" (default "bf16").
+
+    Returns a status string with model info, VRAM budget breakdown, and
+    available alternatives so Opus can make informed decisions.
     """
     health_url = f"http://localhost:{DEVSTRAL_PORT}/health"
     props_url = f"http://localhost:{DEVSTRAL_PORT}/props"
@@ -342,18 +357,22 @@ async def ensure_server() -> str:
             pass
 
     # Not running — auto-spawn
-    # Add server/ to path so we can import without installing
     if str(_SERVER_DIR) not in sys.path:
         sys.path.insert(0, str(_SERVER_DIR.parent))
 
     try:
-        from minion.server.autoconfig import GpuBusyError, check_gpu_contention, detect_vram, select_config
+        from minion.server.autoconfig import (
+            GpuBusyError, check_gpu_contention, detect_vram, detect_total_vram,
+            select_config, list_candidates, estimate_kv_cache_mib,
+        )
         from minion.server.manager import ServerManager
     except ImportError:
-        # Fallback: add plugin root directly
         if str(_PLUGIN_ROOT) not in sys.path:
             sys.path.insert(0, str(_PLUGIN_ROOT))
-        from server.autoconfig import GpuBusyError, check_gpu_contention, detect_vram, select_config
+        from server.autoconfig import (
+            GpuBusyError, check_gpu_contention, detect_vram, detect_total_vram,
+            select_config, list_candidates, estimate_kv_cache_mib,
+        )
         from server.manager import ServerManager
 
     try:
@@ -361,8 +380,29 @@ async def ensure_server() -> str:
     except GpuBusyError as e:
         return f"GPU busy ({e}) — delegating skipped. Opus will work directly."
 
-    vram = detect_vram()
-    config = select_config("code", vram, port=DEVSTRAL_PORT)
+    vram_free = detect_vram()
+    vram_total = detect_total_vram()
+
+    # Build a summary of available options for Opus
+    candidates = list_candidates(vram_free, context, kv_type)
+    options_summary = []
+    for c in candidates[:8]:  # Top 8 options
+        status = "cached+fits" if c["cached"] and c["fits"] else \
+                 "cached" if c["cached"] else \
+                 "needs download" if c["fits"] else "too large"
+        options_summary.append(
+            f"  {c['model'].name} {c['quant'].id}: "
+            f"model={c['model_mib']:.0f}MiB + kv={c['kv_mib']:.0f}MiB "
+            f"= {c['total_mib']:.0f}MiB [{status}]"
+        )
+
+    config = select_config(
+        "code", vram_free, port=DEVSTRAL_PORT,
+        context=context, kv_type=kv_type,
+        model_id=model_id, quant_id=quant_id,
+    )
+    kv_est = estimate_kv_cache_mib(config.model.id, context, kv_type)
+
     manager = ServerManager(config)
 
     in_use, _ = manager.check_port()
@@ -377,11 +417,19 @@ async def ensure_server() -> str:
             f"Server spawned successfully.\n"
             f"Model: {config.model.name} {config.quant.id}\n"
             f"KV: {config.kv_type} | Flash: {config.flash} | Context: {n_ctx} tokens\n"
-            f"VRAM detected: {vram} MiB free"
+            f"VRAM: {vram_free}/{vram_total} MiB free | "
+            f"Model: ~{config.quant.size_gb * 1024:.0f} MiB | "
+            f"KV cache: ~{kv_est:.0f} MiB\n"
+            f"\nAvailable configs:\n" + "\n".join(options_summary)
         )
     except TimeoutError as e:
         manager.shutdown()
-        return f"Server failed to start: {e}"
+        return (
+            f"Server failed to start: {e}\n"
+            f"Tried: {config.model.name} {config.quant.id}\n"
+            f"VRAM: {vram_free}/{vram_total} MiB free\n"
+            f"\nAvailable configs:\n" + "\n".join(options_summary)
+        )
 
 
 if __name__ == "__main__":
