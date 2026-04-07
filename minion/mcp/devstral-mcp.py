@@ -4,15 +4,15 @@
 # ///
 """MCP server exposing the local Devstral model as a tool for Claude Code.
 
-Three tools:
+Tools:
   - ask_devstral: one-shot prompt → text (stateless, fast)
-  - ask_devstral_agent: agent loop with read-only codebase tools
+  - ask_devstral_agent: agent loop with read-only codebase tools (supports multiturn via session_id)
   - ensure_server: checks health, auto-spawns with optimal config if needed
+  - list_sessions / clear_session: manage multiturn conversation sessions
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import subprocess
@@ -32,6 +32,10 @@ MAX_RESULT_BYTES = 8192
 # Path to server/ package — lives alongside mcp/ in the plugin root
 _PLUGIN_ROOT = Path(os.environ.get("CLAUDE_PLUGIN_ROOT", str(Path(__file__).parent.parent)))
 _SERVER_DIR = _PLUGIN_ROOT / "server"
+
+# In-memory conversation sessions — keyed by session_id, value is messages list.
+# Persists for the lifetime of the MCP server process (= Claude Code session).
+_SESSIONS: dict[str, list[dict]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +262,7 @@ async def ask_devstral(
 async def ask_devstral_agent(
     prompt: str,
     cwd: str = ".",
+    session_id: str = "",
     system: str = "You are a coding assistant with access to the codebase. Use the available tools to explore files before answering. Be thorough but concise.",
     persona: str = "",
     max_tokens: int = 4096,
@@ -269,29 +274,36 @@ async def ask_devstral_agent(
     All file access is read-only and sandboxed to cwd.
 
     Set persona to "devstral-coder" or "devstral-analyst" to load that agent's prompt.
+
+    Pass session_id to maintain conversation across multiple calls — Devstral
+    will remember prior messages and tool results. Omit for stateless one-shot.
     """
     cwd = str(Path(cwd).resolve())
 
-    context = _gather_context(cwd)
-    if persona:
-        persona_text = _load_persona(persona)
-        if persona_text:
-            system = persona_text
-    if context:
-        system = f"{context}\n\n---\n\n{system}"
+    # Session continuity: reuse prior messages or start fresh
+    if session_id and session_id in _SESSIONS:
+        messages = _SESSIONS[session_id]
+        messages.append({"role": "user", "content": prompt})
+    else:
+        context = _gather_context(cwd)
+        if persona:
+            persona_text = _load_persona(persona)
+            if persona_text:
+                system = persona_text
+        if context:
+            system = f"{context}\n\n---\n\n{system}"
 
-    # Inject iteration budget awareness
-    system += (
-        f"\n\nYou have a maximum of {max_iterations} tool-call rounds. "
-        f"Budget carefully: read only what you need, then stop calling tools "
-        f"and write your complete answer. Do not spend all rounds reading — "
-        f"reserve at least 2 rounds for your final response."
-    )
+        system += (
+            f"\n\nYou have a maximum of {max_iterations} tool-call rounds. "
+            f"Budget carefully: read only what you need, then stop calling tools "
+            f"and write your complete answer. Do not spend all rounds reading — "
+            f"reserve at least 2 rounds for your final response."
+        )
 
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": prompt},
-    ]
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ]
     tool_call_count = 0
     tool_trace: list[str] = []  # human-readable trace of tool calls
 
@@ -320,6 +332,8 @@ async def ask_devstral_agent(
             tool_calls = msg.get("tool_calls")
             if not tool_calls:
                 answer = msg.get("content", "")
+                if session_id:
+                    _SESSIONS[session_id] = messages
                 if tool_trace:
                     trace_block = "\n".join(tool_trace)
                     return f"{answer}\n\n---\n**Tool trace** ({tool_call_count} calls):\n{trace_block}"
@@ -356,10 +370,34 @@ async def ask_devstral_agent(
 
     last = messages[-1]
     answer = last.get("content", f"Agent reached {max_iterations} iterations without a final answer.")
+    if session_id:
+        _SESSIONS[session_id] = messages
     if tool_trace:
         trace_block = "\n".join(tool_trace)
         return f"{answer}\n\n---\n**Tool trace** ({tool_call_count} calls):\n{trace_block}"
     return answer
+
+
+@mcp.tool()
+async def list_sessions() -> str:
+    """List active Devstral conversation sessions with message counts."""
+    if not _SESSIONS:
+        return "No active sessions."
+    lines = []
+    for sid, msgs in _SESSIONS.items():
+        user_msgs = [m for m in msgs if m.get("role") == "user"]
+        last_user = user_msgs[-1]["content"][:80] if user_msgs else "—"
+        lines.append(f"  {sid}: {len(msgs)} messages, last user: \"{last_user}\"")
+    return f"{len(_SESSIONS)} active session(s):\n" + "\n".join(lines)
+
+
+@mcp.tool()
+async def clear_session(session_id: str) -> str:
+    """Clear a Devstral conversation session, freeing its message history."""
+    if session_id in _SESSIONS:
+        msg_count = len(_SESSIONS.pop(session_id))
+        return f"Session '{session_id}' cleared ({msg_count} messages)."
+    return f"Session '{session_id}' not found."
 
 
 @mcp.tool()
