@@ -284,6 +284,7 @@ async def ask_devstral_agent(
         {"role": "system", "content": system},
         {"role": "user", "content": prompt},
     ]
+    tool_trace: list[str] = []  # human-readable trace of tool calls
 
     async with httpx.AsyncClient() as client:
         for iteration in range(max_iterations):
@@ -303,10 +304,27 @@ async def ask_devstral_agent(
 
             tool_calls = msg.get("tool_calls")
             if not tool_calls:
-                return msg.get("content", "")
+                answer = msg.get("content", "")
+                if tool_trace:
+                    trace_block = "\n".join(tool_trace)
+                    return f"{answer}\n\n---\n**Tool trace** ({len(tool_trace)} calls):\n{trace_block}"
+                return answer
 
             for tc in tool_calls:
+                fn = tc.get("function", {})
+                fn_name = fn.get("name", "?")
+                fn_args = fn.get("arguments", "")
+                # Parse args for a compact summary
+                try:
+                    args_dict = json.loads(fn_args) if isinstance(fn_args, str) else fn_args
+                except (json.JSONDecodeError, TypeError):
+                    args_dict = {"raw": fn_args}
+                args_summary = ", ".join(f"{k}={repr(v)[:80]}" for k, v in args_dict.items())
+                tool_trace.append(f"  [{iteration+1}] {fn_name}({args_summary})")
+
                 result = _execute_tool(tc, cwd)
+                result_preview = result[:120].replace("\n", " ") + ("..." if len(result) > 120 else "")
+                tool_trace.append(f"       → {result_preview}")
                 messages.append({
                     "role": "tool",
                     "content": result,
@@ -314,7 +332,11 @@ async def ask_devstral_agent(
                 })
 
     last = messages[-1]
-    return last.get("content", f"Agent reached {max_iterations} iterations without a final answer.")
+    answer = last.get("content", f"Agent reached {max_iterations} iterations without a final answer.")
+    if tool_trace:
+        trace_block = "\n".join(tool_trace)
+        return f"{answer}\n\n---\n**Tool trace** ({len(tool_trace) // 2} calls):\n{trace_block}"
+    return answer
 
 
 @mcp.tool()
