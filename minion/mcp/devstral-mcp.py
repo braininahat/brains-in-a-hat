@@ -252,7 +252,7 @@ async def ask_devstral(
                 ],
                 "max_tokens": max_tokens,
             },
-            timeout=120.0,
+            timeout=300.0,
         )
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
@@ -323,7 +323,7 @@ async def ask_devstral_agent(
             resp = await client.post(
                 DEVSTRAL_URL,
                 json=request_body,
-                timeout=120.0,
+                timeout=300.0,
             )
             resp.raise_for_status()
             msg = resp.json()["choices"][0]["message"]
@@ -478,6 +478,14 @@ async def ensure_server(
             f"model={c['model_mib']:.0f}MiB + kv={c['kv_mib']:.0f}MiB "
             f"= {c['total_mib']:.0f}MiB [{status}]"
         )
+
+    # Read quant preference from state file (set by mode-switch hook)
+    if quant_id is None:
+        pref_file = Path.home() / ".minion" / "state" / "quant_preference"
+        if pref_file.exists():
+            quant_id = pref_file.read_text().strip()
+            if not model_id:
+                model_id = "devstral"
 
     config = select_config(
         "code", vram_free, port=DEVSTRAL_PORT,

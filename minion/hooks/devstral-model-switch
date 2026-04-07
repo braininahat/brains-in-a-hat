@@ -1,0 +1,8 @@
+#!/bin/bash
+# Switch Devstral quant preference on plan/exec mode transitions.
+# Usage: devstral-model-switch <QUANT_ID>
+QUANT_ID="$1"
+STATE_DIR="$HOME/.minion/state"
+mkdir -p "$STATE_DIR"
+echo "$QUANT_ID" > "$STATE_DIR/quant_preference"
+pkill -f llama-server 2>/dev/null || true
