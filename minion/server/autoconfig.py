@@ -11,7 +11,7 @@ from __future__ import annotations
 import subprocess
 
 from .manager import ServerConfig
-from .models import MODEL_INDEX
+from .models import load_registry
 
 
 def detect_vram() -> int:
@@ -38,7 +38,8 @@ def select_config(task_type: str = "code", vram_mib: int = 0, port: int = 8000) 
       > 20480 MiB (~20 GB free): Devstral Q5_K_XL + bf16 KV
       default (any 24GB GPU):    Devstral Q4_K_XL + bf16 KV
     """
-    devstral = MODEL_INDEX["devstral"]
+    registry = load_registry()
+    devstral = registry["devstral"]
 
     # Select quant based on free VRAM headroom
     # Q5_K_XL is ~20 GB; leave ~4 GB for KV cache overhead
