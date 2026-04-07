@@ -347,14 +347,19 @@ async def ensure_server() -> str:
         sys.path.insert(0, str(_SERVER_DIR.parent))
 
     try:
-        from minion.server.autoconfig import detect_vram, select_config
+        from minion.server.autoconfig import GpuBusyError, check_gpu_contention, detect_vram, select_config
         from minion.server.manager import ServerManager
     except ImportError:
         # Fallback: add plugin root directly
         if str(_PLUGIN_ROOT) not in sys.path:
             sys.path.insert(0, str(_PLUGIN_ROOT))
-        from server.autoconfig import detect_vram, select_config
+        from server.autoconfig import GpuBusyError, check_gpu_contention, detect_vram, select_config
         from server.manager import ServerManager
+
+    try:
+        check_gpu_contention()
+    except GpuBusyError as e:
+        return f"GPU busy ({e}) — delegating skipped. Opus will work directly."
 
     vram = detect_vram()
     config = select_config("code", vram, port=DEVSTRAL_PORT)

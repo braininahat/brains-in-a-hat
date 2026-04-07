@@ -14,6 +14,10 @@ from .manager import ServerConfig
 from .models import load_registry
 
 
+class GpuBusyError(RuntimeError):
+    """Raised when GPU contention makes spawning unsafe."""
+
+
 def detect_vram() -> int:
     """Return free VRAM in MiB for GPU 0, or 0 if nvidia-smi unavailable."""
     try:
@@ -21,11 +25,46 @@ def detect_vram() -> int:
             ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
             text=True, stderr=subprocess.DEVNULL,
         )
-        # First line = GPU 0
         line = out.strip().splitlines()[0].strip()
         return int(line)
     except Exception:
         return 0
+
+
+def check_gpu_contention() -> None:
+    """Raise GpuBusyError if GPU is under heavy load.
+
+    Checks GPU 0 via nvidia-smi. Raises if:
+      - VRAM usage > 50% of total
+      - GPU utilization > 80%
+
+    Does nothing (no error) if nvidia-smi is unavailable.
+    """
+    try:
+        out = subprocess.check_output(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.used,memory.total,utilization.gpu",
+                "--format=csv,noheader,nounits",
+            ],
+            text=True, stderr=subprocess.DEVNULL,
+        )
+        line = out.strip().splitlines()[0]
+        parts = [p.strip() for p in line.split(",")]
+        mem_used, mem_total, util = int(parts[0]), int(parts[1]), int(parts[2])
+    except Exception:
+        return  # Can't determine — allow spawn
+
+    vram_pct = mem_used / mem_total if mem_total > 0 else 0.0
+    if vram_pct > 0.5:
+        raise GpuBusyError(
+            f"GPU VRAM {vram_pct:.0%} used ({mem_used}/{mem_total} MiB) — "
+            "training run likely in progress"
+        )
+    if util > 80:
+        raise GpuBusyError(
+            f"GPU utilization at {util}% — busy with another workload"
+        )
 
 
 def select_config(task_type: str = "code", vram_mib: int = 0, port: int = 8000) -> ServerConfig:
