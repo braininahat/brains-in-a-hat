@@ -1,21 +1,27 @@
 {
   "name": "braininahat",
-  "description": "AI agents for Claude Code — team orchestration and visual communication",
+  "description": "AI agents for Claude Code — team orchestration, scientific visualization, and local LLM delegation",
   "owner": {
     "name": "braininahat"
   },
   "plugins": [
     {
       "name": "brains-in-a-hat",
-      "description": "19 named specialist agents with Neal as chief of staff, agent teams coordination, and vault persistence",
-      "version": "0.4.0",
+      "description": "20 named specialist agents with Neal as chief of staff, agent teams coordination, vault persistence, and live dashboard",
+      "version": "0.6.7",
       "source": "./brains-in-a-hat"
     },
     {
-      "name": "grant",
-      "description": "Visual-first communicator — answers questions through interactive HTML visualizations",
-      "version": "0.1.0",
-      "source": "./grant"
+      "name": "archer",
+      "description": "Publication-quality scientific visualization — ML architecture diagrams, TikZ rendering, Typst reports, and data plots following petarv/janosh visual principles",
+      "version": "0.1.6",
+      "source": "./archer"
+    },
+    {
+      "name": "minion",
+      "description": "Opus plans, Devstral executes. Auto-spawns local LLM with optimal config.",
+      "version": "1.0.0",
+      "source": "./minion"
     }
   ]
 }
