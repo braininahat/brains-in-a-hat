@@ -30,3 +30,6 @@ fi
 
 git tag "$tag"
 echo "Tagged: ${tag}"
+
+# Push tag to remote (best-effort, don't block)
+git push origin "$tag" 2>/dev/null || true
