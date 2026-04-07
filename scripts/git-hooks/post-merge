@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Auto-tag after merge to main with current plugin version.
+# Creates: v{version} tag (e.g. v0.7.0) from brains-in-a-hat plugin version.
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+MAIN_PLUGIN="${REPO_ROOT}/brains-in-a-hat/.claude-plugin/plugin.json"
+
+if [ ! -f "$MAIN_PLUGIN" ]; then
+  exit 0
+fi
+
+# Only tag on main branch
+branch=$(git rev-parse --abbrev-ref HEAD)
+if [ "$branch" != "main" ]; then
+  exit 0
+fi
+
+version=$(grep -oP '"version"\s*:\s*"\K[^"]+' "$MAIN_PLUGIN")
+if [ -z "$version" ]; then
+  exit 0
+fi
+
+tag="v${version}"
+
+# Don't re-tag if this version is already tagged
+if git rev-parse "$tag" >/dev/null 2>&1; then
+  exit 0
+fi
+
+git tag "$tag"
+echo "Tagged: ${tag}"
