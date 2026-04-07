@@ -37,7 +37,7 @@ bump_version() {
   fi
 
   local new_version="${major}.${minor}.${patch}"
-  sed -i "0,/\"version\": \"${version}\"/s//\"version\": \"${new_version}\"/" "$file"
+  sed -i "0,/\"version\"[[:space:]]*:[[:space:]]*\"${version}\"/s//\"version\": \"${new_version}\"/" "$file"
   git add "$file"
 }
 
