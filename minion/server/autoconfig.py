@@ -168,8 +168,8 @@ def max_context_for_budget(
 
 def list_candidates(
     vram_mib: int,
-    context: int = 65536,
-    kv_type: str = "q4_0",
+    context: int = 98304,
+    kv_type: str = "q8_0",
     require_cached: bool = True,
     safety_margin_mib: int = 512,
 ) -> list[dict]:
@@ -251,8 +251,8 @@ def select_config(
     task_type: str = "code",
     vram_mib: int = 0,
     port: int = 8000,
-    context: int = 65536,
-    kv_type: str = "q4_0",
+    context: int = 98304,
+    kv_type: str = "q8_0",
     model_id: str | None = None,
     quant_id: str | None = None,
 ) -> ServerConfig:

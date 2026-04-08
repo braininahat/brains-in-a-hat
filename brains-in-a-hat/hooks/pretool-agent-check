@@ -151,9 +151,69 @@ sonnet_ceiling() {
   esac
 }
 
+# ── Explore Vault Hint (advisory) ───────────────────────────────────
+
+explore_vault_hint() {
+  local agent_type
+  agent_type=$(echo "$INPUT" | jq -r '.tool_input.subagent_type // empty' 2>/dev/null) || true
+
+  # Only target generic Explore agents
+  [ "$agent_type" = "Explore" ] || return 0
+
+  VAULT_DIR="${VAULT_DIR:-${HOME}/.brains_in_a_hat/vault}"
+  [ -d "$VAULT_DIR" ] || return 0
+  [ -n "$PROMPT" ] || return 0
+
+  # Skip if prompt already declares vault reviewed
+  echo "$PROMPT" | grep -qF '[vault-reviewed]' && return 0
+
+  # Check if vault has any project or wiki notes that might be relevant
+  local search_dirs=()
+  for d in "$VAULT_DIR/wiki" "$VAULT_DIR/projects/$PROJECT"; do
+    [ -d "$d" ] && search_dirs+=("$d")
+  done
+  [ "${#search_dirs[@]}" -gt 0 ] || return 0
+
+  # Extract a few salient keywords from the prompt
+  local stopwords="the a an is are was were be been being have has had do does did will would shall should may might can could of in to for on with at by from as into through during before after above below between your you this that these those it its and or but not no nor so yet also very just only even still already when what which who whom how where why each every all any few more most other some such than too much many well here there then now code file files find search look explore how does work codebase quickly"
+  local keywords
+  keywords=$(echo "$PROMPT" | tr '[:upper:]' '[:lower:]' | tr -cs '[:alpha:]' '\n' | \
+    grep -vxFf <(printf '%s\n' $stopwords) 2>/dev/null | \
+    sort | uniq -c | sort -rn | awk '{print $2}' | head -6) || true
+  [ -n "$keywords" ] || return 0
+
+  local pattern
+  pattern=$(echo "$keywords" | tr '\n' '|' | sed 's/|$//')
+  [ -n "$pattern" ] || return 0
+
+  # Look for vault files matching at least 2 keywords
+  local candidates
+  candidates=$(grep -rl -iE "$pattern" "${search_dirs[@]}" 2>/dev/null) || true
+  [ -n "$candidates" ] || return 0
+
+  local matched_files=""
+  while IFS= read -r file; do
+    [ -f "$file" ] || continue
+    local hits=0
+    for kw in $keywords; do
+      grep -qil "$kw" "$file" 2>/dev/null && hits=$((hits + 1))
+    done
+    [ "$hits" -ge 2 ] && matched_files="${matched_files}${file}"$'\n'
+  done <<< "$candidates"
+
+  matched_files=$(echo "$matched_files" | sed '/^$/d')
+  if [ -n "$matched_files" ]; then
+    local file_list
+    file_list=$(echo "$matched_files" | head -5 | tr '\n' ', ' | sed 's/, $//')
+    printf '{"hookSpecificOutput":{"additionalContext":"VAULT HINT: Before exploring locally, check these vault notes which may already cover this topic: %s. Add [vault-reviewed] to the prompt to suppress this hint."}}' "$file_list"
+    exit 0
+  fi
+}
+
 # ── Main ─────────────────────────────────────────────────────────────
 
 sonnet_ceiling
+explore_vault_hint
 vault_check
 model_check
 # No ceiling violation, no vault match, no model mismatch — allow silently

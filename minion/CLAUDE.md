@@ -27,9 +27,11 @@ Devstral never acts autonomously — it only responds to prompts crafted by Opus
 
 ## Auto-spawn
 
-The `ensure_server` tool detects available VRAM via nvidia-smi and selects the optimal model+quant+KV config automatically:
-- Default: Devstral Q4_K_XL + bf16 KV (fits any 24GB GPU)
-- If >20GB free VRAM: Devstral Q5_K_XL
+The `ensure_server` tool spawns llama-server (ik_llama.cpp) with pinned config:
+- **Plan mode**: Devstral Q4_K_M + Q8 KV + 96K context + hadamard
+- **Execution mode**: Devstral IQ4_NL + Q8 KV + 96K context + hadamard
+
+Quant switches automatically via mode-transition hooks writing `~/.minion/state/quant_preference`.
 
 Call `ensure_server` before the first `ask_devstral_agent` call if you're unsure whether the server is running.
 
