@@ -404,8 +404,8 @@ async def clear_session(session_id: str) -> str:
 async def ensure_server(
     model_id: str | None = None,
     quant_id: str | None = None,
-    context: int = 32768,
-    kv_type: str = "bf16",
+    context: int = 98304,
+    kv_type: str = "q8_0",
 ) -> str:
     """Check if llama-server is healthy on localhost:8000. Auto-spawns with optimal config if not.
 
@@ -413,11 +413,14 @@ async def ensure_server(
     KV cache overhead, and selects the best config that fits. Never picks a
     quant that isn't locally cached (avoids multi-GB download timeouts).
 
+    Pinned: Devstral Q4_K_M (plan) / IQ4_NL (exec), Q8 KV cache, 96K context,
+    hadamard on. Quant switches via ~/.minion/state/quant_preference.
+
     Args:
-        model_id: Override model selection (e.g. "devstral", "qwen35"). Auto-selects if None.
-        quant_id: Override quant selection (e.g. "Q4_K_XL", "Q5_K_XL"). Auto-selects if None.
-        context: Target context length in tokens (default 32768).
-        kv_type: KV cache dtype — "bf16", "f16", "q8_0", or "q4_0" (default "bf16").
+        model_id: Override model selection. Default: "devstral" (pinned).
+        quant_id: Override quant selection. Default: from preference file, fallback Q4_K_M.
+        context: Target context length in tokens (default 98304 = 96K).
+        kv_type: KV cache dtype — "bf16", "f16", "q8_0", or "q4_0" (default "q8_0").
 
     Returns a status string with model info, VRAM budget breakdown, and
     available alternatives so Opus can make informed decisions.
@@ -479,13 +482,12 @@ async def ensure_server(
             f"= {c['total_mib']:.0f}MiB [{status}]"
         )
 
-    # Read quant preference from state file (set by mode-switch hook)
+    # Pinned: always devstral, quant from preference file or Q4_K_M fallback
+    if not model_id:
+        model_id = "devstral"
     if quant_id is None:
         pref_file = Path.home() / ".minion" / "state" / "quant_preference"
-        if pref_file.exists():
-            quant_id = pref_file.read_text().strip()
-            if not model_id:
-                model_id = "devstral"
+        quant_id = pref_file.read_text().strip() if pref_file.exists() else "Q4_K_M"
 
     config = select_config(
         "code", vram_free, port=DEVSTRAL_PORT,
