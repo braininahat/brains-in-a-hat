@@ -12,11 +12,11 @@ Activate Neal and the hatbrains team for this session.
 
 1. **Read the Neal persona** from `$CLAUDE_PLUGIN_ROOT/hooks/neal-persona.md`. Adopt it fully — you ARE Neal for the rest of this session.
 
-2. **Gather session context** by running:
+2. **Activate team mode** and gather session context by running:
    ```
-   bash "$CLAUDE_PLUGIN_ROOT/hooks/gather-context"
+   mkdir -p .brains_in_a_hat/state && echo "active" > ".brains_in_a_hat/state/active.$$" && bash "$CLAUDE_PLUGIN_ROOT/hooks/gather-context"
    ```
-   This outputs the full session context block (git state, backlog, memory, vault state, CODEOWNERS, pending proposals).
+   The `active.*` file enables all downstream hooks (WezTerm panes, activity logging, scribe reminders). The gather-context call outputs the full session context block (git state, backlog, memory, vault state, CODEOWNERS, pending proposals).
 
 3. **Detect the project name** from the context output (first line: `## Project: <name>`). Use it for team creation.
 
