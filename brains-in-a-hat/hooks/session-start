@@ -167,7 +167,7 @@ main() {
     kill -0 "$pid" 2>/dev/null || rm -f "$marker"
   done
   # Clean up stale wezterm/terminal pane state files
-  rm -f "${STATE_DIR}"/wezterm-feed-*.id "${STATE_DIR}"/wezterm-pane-*.id "${STATE_DIR}"/wezterm-cols-*.json 2>/dev/null || true
+  rm -f "${STATE_DIR}"/wezterm-feed-*.id "${STATE_DIR}"/wezterm-pane-*.id "${STATE_DIR}"/wezterm-cols-*.json "${STATE_DIR}"/wezterm-grid.json "${STATE_DIR}"/tmux-shim.log 2>/dev/null || true
   # Clean up stale session-state lock (shouldn't persist — safety net)
   rmdir "${STATE_DIR}/session-state.json.lock.d" 2>/dev/null || true
   # Only clear session state if no other session is active
