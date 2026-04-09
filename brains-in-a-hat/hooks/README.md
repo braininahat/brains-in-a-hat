@@ -29,7 +29,7 @@ SessionStart ──► session-start (via run-hook.cmd)
                    ├─ Starts dashboard server (non-blocking)
                    ├─ First-run: creates vault dirs, CODEOWNERS, Obsidian config
                    ├─ Cleans stale state: active.*, missing-shown.*, skills-cache-built.*,
-                   │                     zellij-pane-*.id files whose PID is dead
+                   │                     wezterm-*.id files from prior sessions
                    ├─ Appends session record to ~/.brains_in_a_hat/active-sessions.jsonl
                    └─ No persona injection (bootstrap only)
 
@@ -50,8 +50,7 @@ Agent spawned
     ▼
 SubagentStart ──► (three steps)
                    ├─ Step 1: appends { ts, agent, session, event:"start" } to activity.jsonl
-                   ├─ Step 2: (Zellij) opens floating pane tailing agent's activity entries
-                   │          (pane-id file scoped by session PID)
+                   ├─ Step 2: (WezTerm) wezterm-pane start — opens per-agent pane in grid layout
                    └─ Step 3: inject-subagent-context — emits PROTOCOLS + precomputed suffix
                               (RECOMMENDED SKILLS + inline fallbacks for missing workflow skills)
 
@@ -60,7 +59,7 @@ Agent completes
     ▼
 SubagentStop ──► (two steps)
                   ├─ Step 1: appends { ts, agent, session, event:"done" } to activity.jsonl
-                  └─ Step 2: (Zellij) renames pane to "<Agent> [done]", removes pane-id file
+                  └─ Step 2: (WezTerm) wezterm-pane stop — injects ✓ done marker into activity log
 
 Tool call: Agent
     │

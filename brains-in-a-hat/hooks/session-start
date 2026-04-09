@@ -162,19 +162,8 @@ main() {
     local pid="${marker##*/skills-cache-built.}"
     kill -0 "$pid" 2>/dev/null || rm -f "$marker"
   done
-  # Clean up stale wezterm feed/pane files
-  rm -f "${STATE_DIR}"/wezterm-feed-*.id "${STATE_DIR}"/wezterm-pane-*.id 2>/dev/null || true
-  # Clean up stale zellij-pane files (format: zellij-pane-<PID>-<AGENT>.id)
-  for pane in "${STATE_DIR}"/zellij-pane-*.id; do
-    [ -f "$pane" ] || continue
-    local base="${pane##*/zellij-pane-}"   # e.g., "12345-Drew.id"
-    local pid="${base%%-*}"                # first segment before '-'
-    # Skip legacy files (no PID prefix — agent name has no leading digits)
-    case "$pid" in
-      [0-9]*) kill -0 "$pid" 2>/dev/null || rm -f "$pane" ;;
-      *) rm -f "$pane" ;;  # legacy zellij-pane-<AGENT>.id — safe to remove
-    esac
-  done
+  # Clean up stale wezterm/terminal pane state files
+  rm -f "${STATE_DIR}"/wezterm-feed-*.id "${STATE_DIR}"/wezterm-pane-*.id "${STATE_DIR}"/wezterm-cols-*.json 2>/dev/null || true
   # Clean up stale session-state lock (shouldn't persist — safety net)
   rmdir "${STATE_DIR}/session-state.json.lock.d" 2>/dev/null || true
   # Only clear session state if no other session is active

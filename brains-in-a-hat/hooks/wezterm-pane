@@ -10,7 +10,7 @@
 #   5th agent:  [CC | A1-4 | A5]              (new column)
 #   6th-8th:    [CC | A1-4 | A5 / A6 / A7 / A8]
 #   Max 4 rows per column. New column every 4 agents.
-set -euo pipefail
+set -uo pipefail  # no -e: wezterm cli failures are non-fatal
 
 [ -n "${WEZTERM_PANE:-}" ] || exit 0
 ls .brains_in_a_hat/state/active.* &>/dev/null || exit 0
@@ -58,17 +58,21 @@ case "$ACTION" in
         NEW_PANE=$(wezterm cli split-pane --right --pane-id "$PREV_COL_ANCHOR" \
           -- bash -c "$TAIL_CMD" 2>/dev/null) || exit 0
       fi
-      # Record this as the column anchor
-      jq --argjson idx "$COL_IDX" --argjson pane "$NEW_PANE" \
-        '.cols[$idx] = $pane | .count += 1' "$COLS_FILE" > "${COLS_FILE}.tmp" && \
-        mv "${COLS_FILE}.tmp" "$COLS_FILE"
+      # Record this as the column anchor (only if split succeeded)
+      if [ -n "${NEW_PANE:-}" ]; then
+        jq --argjson idx "$COL_IDX" --argjson pane "$NEW_PANE" \
+          '.cols[$idx] = $pane | .count += 1' "$COLS_FILE" > "${COLS_FILE}.tmp" && \
+          mv "${COLS_FILE}.tmp" "$COLS_FILE"
+      fi
     else
       # Add row within current column: split bottom from the column anchor
       COL_ANCHOR=$(jq -r ".cols[$COL_IDX]" "$COLS_FILE")
       NEW_PANE=$(wezterm cli split-pane --bottom --pane-id "$COL_ANCHOR" \
-        -- bash -c "$TAIL_CMD" 2>/dev/null) || exit 0
-      jq '.count += 1' "$COLS_FILE" > "${COLS_FILE}.tmp" && \
-        mv "${COLS_FILE}.tmp" "$COLS_FILE"
+        -- bash -c "$TAIL_CMD" 2>/dev/null) || true
+      if [ -n "${NEW_PANE:-}" ]; then
+        jq '.count += 1' "$COLS_FILE" > "${COLS_FILE}.tmp" && \
+          mv "${COLS_FILE}.tmp" "$COLS_FILE"
+      fi
     fi
 
     [ -n "${NEW_PANE:-}" ] && echo "$NEW_PANE" > "$PANE_FILE"
