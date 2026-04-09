@@ -42,9 +42,8 @@ dashboard_start() {
       url=$(grep -oP 'http://[^ ]+' "${STATE_DIR}/dashboard.log" 2>/dev/null | head -1)
       attempts=$((attempts + 1))
     done
-    if [ -n "${url}" ]; then
-      (xdg-open "${url}" 2>/dev/null || open "${url}" 2>/dev/null) &
-    fi
+    # Dashboard URL is logged but NOT auto-opened (can freeze the system)
+    # Access manually at the URL in .brains_in_a_hat/state/dashboard.log
   fi
 }
 
