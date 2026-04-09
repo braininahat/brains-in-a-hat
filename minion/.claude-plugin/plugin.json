@@ -1,6 +1,6 @@
 {
   "name": "minion",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Opus plans, Devstral executes. Auto-spawns local LLM with optimal config.",
   "author": { "name": "braininahat" },
   "repository": "https://github.com/braininahat/brains-in-a-hat",
