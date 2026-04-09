@@ -25,9 +25,9 @@ vault_check() {
   # Exempt infrastructure agents — they're not doing research
   local agent_type
   agent_type=$(echo "$INPUT" | jq -r '.tool_input.subagent_type // empty' 2>/dev/null) || true
-  case "$agent_type" in
-    brains-in-a-hat:scribe|brains-in-a-hat:session-manager|brains-in-a-hat:meta-retro) return 0 ;;
-  esac
+  # All brains-in-a-hat team agents skip vault check — it's for gating
+  # generic Explore/research spawns, not team member dispatches
+  echo "$agent_type" | grep -q '^brains-in-a-hat:' && return 0
 
   # Bypass: if prompt explicitly declares vault was reviewed, skip check
   echo "$PROMPT" | grep -qF '[vault-reviewed]' && return 0
