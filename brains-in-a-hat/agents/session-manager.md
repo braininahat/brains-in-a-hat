@@ -63,7 +63,7 @@ Produce a briefing by reading:
 2. **Open issues** — `gh issue list --limit 10` (if gh available). Triage: prioritize, link related, flag duplicates.
 3. **Team state** — `.brains_in_a_hat/CODEOWNERS`, `.brains_in_a_hat/state/last-retro.md`
 4. **In-session decisions** — `.brains_in_a_hat/state/session-state.json` `.decisions[]` array. User directives and key decisions recorded this session. List the most recent 5, prefix each with `[DECISION]`.
-5. **Prior session** — check `~/.brains_in_a_hat/vault/projects/` for recent retros/decisions. Prefer `patterns.md` over scanning individual retros when both exist.
+5. **Prior session** — check `~/.brains_in_a_hat/vault/` for recent retros/decisions (filter by `type:` and `project:` frontmatter). Prefer patterns notes over scanning individual retros when both exist.
 6. **Pending proposals** — unchecked action items from vault retros (injected by session-start hook under `## Pending Proposals`). Surface these prominently — they represent the team's self-improvement backlog.
 
 Output a concise briefing (under 20 lines):
@@ -83,8 +83,7 @@ Persist session state:
 1. **Local state** — write `.brains_in_a_hat/state/last-retro.md` with session summary
 2. **Promote in-session decisions** — read `.brains_in_a_hat/state/session-state.json` `.decisions[]` array. For each entry, write a durable `decisions/<slug>.md` to the vault (flat structure — use `type: decision` frontmatter). Slug from first few words of `text`.
 3. **Vault** — if `~/.brains_in_a_hat/vault/` exists:
-   - `mkdir -p ~/.brains_in_a_hat/vault/projects/<project-name>/retros/`
-   - Write `retros/YYYY-MM-DD.md` using the format from `$CLAUDE_PLUGIN_ROOT/vault-templates/retro.md`
+   - Write `~/.brains_in_a_hat/vault/<project>--retro-YYYY-MM-DD.md` using `$CLAUDE_PLUGIN_ROOT/vault-templates/retro.md`
    - Include Dataview frontmatter (`type`, `project`, `agents`, `date`, `tags`, `status`)
    - Use `[[wikilinks]]` to cross-reference decisions promoted in step 2
 

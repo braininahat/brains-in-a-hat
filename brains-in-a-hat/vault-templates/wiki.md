@@ -1,6 +1,6 @@
 ---
 type: wiki
-write-path: "~/.brains_in_a_hat/vault/wiki/"
+write-path: "~/.brains_in_a_hat/vault/"
 title: "{{title}}"
 tags: []
 source: {{source}}

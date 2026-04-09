@@ -386,19 +386,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def _serve_vault(self):
         """Walk ~/.brains_in_a_hat/vault/ and return a JSON array of vault notes.
 
-        Each entry: {"path": "<relative>", "type": "<dir-derived type>", "title": "<filename-derived>"}
-        Only .md files are included.
-        Type is determined from the immediate parent directory name using VAULT_TYPE_MAP.
-        Title is the stem with hyphens replaced by spaces, title-cased.
+        Each entry: {"path": "<relative>", "type": "<frontmatter type>", "title": "<from heading or filename>", "project": "<frontmatter project>"}
+        Only .md files are included. Type and project are read from YAML frontmatter.
         """
-        VAULT_TYPE_MAP = {
-            "decisions": "decision",
-            "retros": "retro",
-            "research": "research",
-            "architecture": "architecture",
-            "qa-reviews": "qa-review",
-        }
-
         vault_dir = self.server.vault_dir
         notes = []
 
@@ -407,8 +397,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
 
         for root, dirs, filenames in os.walk(vault_dir):
-            # Sort dirs for deterministic ordering
-            dirs.sort()
+            dirs[:] = [d for d in sorted(dirs) if not d.startswith(".")]
             root_path = Path(root)
 
             for filename in sorted(filenames):
@@ -421,19 +410,37 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 except ValueError:
                     continue
 
-                # Type from immediate parent directory name
-                parent_name = abs_path.parent.name
-                note_type = VAULT_TYPE_MAP.get(parent_name, parent_name)
+                # Read type and project from YAML frontmatter
+                note_type = "note"
+                project = ""
+                title = abs_path.stem.replace("-", " ").replace("--", " / ").title()
+                try:
+                    with open(abs_path, "r", errors="replace") as f:
+                        lines = f.readlines()
+                    if lines and lines[0].strip() == "---":
+                        for line in lines[1:]:
+                            if line.strip() == "---":
+                                break
+                            if line.startswith("type:"):
+                                note_type = line.split(":", 1)[1].strip().strip('"')
+                            elif line.startswith("project:"):
+                                project = line.split(":", 1)[1].strip().strip('"')
+                        # Title from first heading if present
+                        for line in lines:
+                            if line.startswith("# "):
+                                title = line[2:].strip()
+                                break
+                except Exception:
+                    pass
 
-                # Title from filename stem
-                stem = abs_path.stem
-                title = stem.replace("-", " ").title()
-
-                notes.append({
+                entry = {
                     "path": str(rel_path),
                     "type": note_type,
                     "title": title,
-                })
+                }
+                if project:
+                    entry["project"] = project
+                notes.append(entry)
 
         self._send_json(notes)
 

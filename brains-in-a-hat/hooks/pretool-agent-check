@@ -41,17 +41,10 @@ vault_check() {
   pattern=$(echo "$keywords" | tr '\n' '|' | sed 's/|$//')
   [ -n "$pattern" ] || return 0
 
-  # Search current project vault (flat) + global wiki only
-  local search_dirs=()
-  for d in "$VAULT_DIR/wiki" \
-           "$VAULT_DIR/projects/$PROJECT"; do
-    [ -d "$d" ] && search_dirs+=("$d")
-  done
-  [ "${#search_dirs[@]}" -gt 0 ] || return 0
-
+  # Search entire vault (flat structure — all notes at root)
   # First pass: find files matching any keyword
   local candidates
-  candidates=$(grep -rl -iE "$pattern" "${search_dirs[@]}" 2>/dev/null) || true
+  candidates=$(grep -rl -iE "$pattern" "$VAULT_DIR" --include='*.md' 2>/dev/null) || true
   [ -n "$candidates" ] || return 0
 
   # Second pass: require 3+ distinct keyword matches per file
@@ -167,13 +160,6 @@ explore_vault_hint() {
   # Skip if prompt already declares vault reviewed
   echo "$PROMPT" | grep -qF '[vault-reviewed]' && return 0
 
-  # Check if vault has any project or wiki notes that might be relevant
-  local search_dirs=()
-  for d in "$VAULT_DIR/wiki" "$VAULT_DIR/projects/$PROJECT"; do
-    [ -d "$d" ] && search_dirs+=("$d")
-  done
-  [ "${#search_dirs[@]}" -gt 0 ] || return 0
-
   # Extract a few salient keywords from the prompt
   local stopwords="the a an is are was were be been being have has had do does did will would shall should may might can could of in to for on with at by from as into through during before after above below between your you this that these those it its and or but not no nor so yet also very just only even still already when what which who whom how where why each every all any few more most other some such than too much many well here there then now code file files find search look explore how does work codebase quickly"
   local keywords
@@ -188,7 +174,7 @@ explore_vault_hint() {
 
   # Look for vault files matching at least 2 keywords
   local candidates
-  candidates=$(grep -rl -iE "$pattern" "${search_dirs[@]}" 2>/dev/null) || true
+  candidates=$(grep -rl -iE "$pattern" "$VAULT_DIR" --include='*.md' 2>/dev/null) || true
   [ -n "$candidates" ] || return 0
 
   local matched_files=""

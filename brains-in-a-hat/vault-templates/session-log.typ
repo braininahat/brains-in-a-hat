@@ -1,6 +1,6 @@
 // Session Log — {{project}}
 // Auto-maintained by Gale (session scribe)
-// Path: ~/.brains_in_a_hat/vault/projects/{{project}}/session-log.typ
+// Path: ~/.brains_in_a_hat/vault/{{project}}--session-log.typ
 
 #import "@local/diagrams:0.1.0": *
 
@@ -80,7 +80,7 @@
 //
 // External images (screenshots, plots, wandb exports):
 //   #figure(
-//     image("figures/loss-curve.png", width: 80%),
+//     image("attachments/loss-curve.png", width: 80%),
 //     caption: [Training loss over epochs.],
 //   ) <fig:loss>
 //

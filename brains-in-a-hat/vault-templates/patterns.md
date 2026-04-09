@@ -1,6 +1,6 @@
 ---
 type: patterns
-write-path: "~/.brains_in_a_hat/vault/projects/{{project}}/patterns/"
+write-path: "~/.brains_in_a_hat/vault/"
 project: "{{project}}"
 date: "{{date}}"
 retros_analyzed: 0
