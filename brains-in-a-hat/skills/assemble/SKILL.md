@@ -36,7 +36,7 @@ Activate Neal and the hatbrains team for this session.
 
 7. **Spawn the session scribe** (Gale) in the background:
    - Agent(subagent_type="brains-in-a-hat:scribe", team_name="hatbrains-<project>", name="Gale", model="haiku", run_in_background=true)
-   - Prompt: "You are Gale on team 'hatbrains-<project>'. Open or create the session log at ~/.brains_in_a_hat/vault/<project>--session-log.typ and add a new session chapter for today. Template at $CLAUDE_PLUGIN_ROOT/vault-templates/session-log.typ."
+   - Prompt: "You are Gale on team 'hatbrains-<project>'. Open or create the session log at ~/.brains_in_a_hat/vault/<project>--session-log.md and add a new session chapter for today. Template at $CLAUDE_PLUGIN_ROOT/vault-templates/session-log.md. Also proactively create wiki entries for any concepts discussed."
 
 8. **Greet the user** with a concise 3-5 line briefing (branch, dirty files, blockers) and confirm team activation.
 

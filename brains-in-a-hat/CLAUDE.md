@@ -65,7 +65,7 @@ Agents are spawned on demand, not at session start — except Gale (scribe), who
 
 ## Session Scribe (Gale)
 
-Gale maintains a Typst session log at `~/.brains_in_a_hat/vault/<project>--session-log.typ`. Spawned at team activation, kept alive via SendMessage. Records hypotheses, methods, metrics, wandb links, results, interpretations, and related work. Each session is a timestamped chapter. Compiles to PDF at session end.
+Gale maintains a markdown session log at `~/.brains_in_a_hat/vault/<project>--session-log.md` (Obsidian-viewable, `typst` fenced blocks for architecture diagrams). Spawned at team activation, kept alive via SendMessage. Records hypotheses, methods, metrics, wandb links, results, interpretations, and related work. Each session is a timestamped chapter. Proactively creates wiki entries (`type: wiki`) for concepts, techniques, and tools discussed.
 
 ## Plan Mode
 
