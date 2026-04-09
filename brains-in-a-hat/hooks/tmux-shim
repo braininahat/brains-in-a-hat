@@ -21,8 +21,7 @@ echo "[$(date -Iseconds)] tmux $*" >> "$LOG" 2>/dev/null
 case "$1" in
   split-window)
     shift
-    # Parse tmux split-window flags
-    DIRECTION="--bottom"
+    # Parse tmux split-window flags — extract the command to run
     CMD_ARGS=()
     SKIP_NEXT=false
     while [ $# -gt 0 ]; do
@@ -32,28 +31,61 @@ case "$1" in
         continue
       fi
       case "$1" in
-        -h) DIRECTION="--right"; shift ;;
-        -v) DIRECTION="--bottom"; shift ;;
-        -p) SKIP_NEXT=true; shift ;;  # -p <percent> — skip, use wezterm default
-        -l) SKIP_NEXT=true; shift ;;  # -l <size> — skip
-        -t) SKIP_NEXT=true; shift ;;  # -t <target> — skip
-        -d) shift ;;                   # don't focus — wezterm default
-        -P) shift ;;                   # print info — ignore
-        -F) SKIP_NEXT=true; shift ;;  # format string — skip
+        -h|-v|-d|-P) shift ;;          # ignore direction/detach/print flags
+        -p|-l|-t|-F) SKIP_NEXT=true; shift ;;  # skip flag + value
         --) shift; CMD_ARGS=("$@"); break ;;
-        -*) shift ;;                   # skip unknown flags
+        -*) shift ;;
         *)  CMD_ARGS=("$@"); break ;;
       esac
     done
 
-    if [ ${#CMD_ARGS[@]} -gt 0 ]; then
-      PANE_ID=$(wezterm cli split-pane $DIRECTION --pane-id "${WEZTERM_PANE:-0}" -- "${CMD_ARGS[@]}" 2>>"$LOG")
-      echo "[$(date -Iseconds)] -> wezterm split-pane $DIRECTION -> pane $PANE_ID" >> "$LOG" 2>/dev/null
-      # Refocus original pane
-      wezterm cli activate-pane --pane-id "${WEZTERM_PANE:-0}" 2>/dev/null
-      # Output pane ID (tmux would print pane info with -P)
-      echo "$PANE_ID"
+    [ ${#CMD_ARGS[@]} -gt 0 ] || exit 0
+
+    # Grid layout: Claude stays leftmost single row.
+    # Agents stack up to MAX_ROWS per column, new column on overflow.
+    MAX_ROWS=4
+    STATE_FILE=".brains_in_a_hat/state/wezterm-grid.json"
+    mkdir -p .brains_in_a_hat/state 2>/dev/null
+
+    if [ ! -f "$STATE_FILE" ]; then
+      echo '{"cols":[],"count":0}' > "$STATE_FILE"
     fi
+
+    COUNT=$(jq -r '.count' "$STATE_FILE" 2>/dev/null) || COUNT=0
+    COL_IDX=$((COUNT / MAX_ROWS))
+    ROW_IDX=$((COUNT % MAX_ROWS))
+
+    if [ "$ROW_IDX" -eq 0 ]; then
+      # New column: split right
+      if [ "$COL_IDX" -eq 0 ]; then
+        # First column: split from Claude's pane
+        ANCHOR="${WEZTERM_PANE:-0}"
+      else
+        # Additional columns: split from previous column's anchor
+        ANCHOR=$(jq -r ".cols[$((COL_IDX - 1))]" "$STATE_FILE" 2>/dev/null) || ANCHOR="${WEZTERM_PANE:-0}"
+      fi
+      NEW_PANE=$(wezterm cli split-pane --right --pane-id "$ANCHOR" -- "${CMD_ARGS[@]}" 2>>"$LOG") || exit 0
+      if [ -n "${NEW_PANE:-}" ]; then
+        jq --argjson idx "$COL_IDX" --argjson pane "$NEW_PANE" \
+          '.cols[$idx] = $pane | .count += 1' "$STATE_FILE" > "${STATE_FILE}.tmp" && \
+          mv "${STATE_FILE}.tmp" "$STATE_FILE"
+      fi
+    else
+      # Add row: split bottom from column anchor
+      ANCHOR=$(jq -r ".cols[$COL_IDX]" "$STATE_FILE" 2>/dev/null) || ANCHOR="${WEZTERM_PANE:-0}"
+      NEW_PANE=$(wezterm cli split-pane --bottom --pane-id "$ANCHOR" -- "${CMD_ARGS[@]}" 2>>"$LOG") || exit 0
+      if [ -n "${NEW_PANE:-}" ]; then
+        jq '.count += 1' "$STATE_FILE" > "${STATE_FILE}.tmp" && \
+          mv "${STATE_FILE}.tmp" "$STATE_FILE"
+      fi
+    fi
+
+    echo "[$(date -Iseconds)] -> grid col=$COL_IDX row=$ROW_IDX anchor=$ANCHOR -> pane ${NEW_PANE:-?}" >> "$LOG" 2>/dev/null
+
+    # Refocus Claude's pane
+    wezterm cli activate-pane --pane-id "${WEZTERM_PANE:-0}" 2>/dev/null
+    # Output pane ID (tmux prints pane info with -P)
+    echo "${NEW_PANE:-}"
     ;;
 
   display-message)
