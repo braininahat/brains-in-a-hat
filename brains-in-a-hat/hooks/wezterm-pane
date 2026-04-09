@@ -12,12 +12,17 @@
 #   Max 4 rows per column. New column every 4 agents.
 set -uo pipefail  # no -e: wezterm cli failures are non-fatal
 
+DEBUG_LOG=".brains_in_a_hat/state/hook-debug.log"
+
 [ -n "${WEZTERM_PANE:-}" ] || exit 0
 ls .brains_in_a_hat/state/active.* &>/dev/null || exit 0
 command -v wezterm &>/dev/null || exit 0
 
 ACTION="${1:-}"
 INPUT=$(cat)
+
+# On any failure, log and exit cleanly (never error the hook)
+trap 'echo "[$(date -Iseconds)] wezterm-pane $ACTION failed: line $LINENO" >> "$DEBUG_LOG" 2>/dev/null; exit 0' ERR
 AGENT_NAME=$(echo "$INPUT" | jq -r '.name // .agent_type // "agent"' 2>/dev/null) || exit 0
 SESSION=$(ls -t .brains_in_a_hat/state/active.* 2>/dev/null | head -1)
 SESSION="${SESSION##*/active.}"
