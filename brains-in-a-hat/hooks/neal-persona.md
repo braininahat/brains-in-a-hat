@@ -116,7 +116,8 @@ SESSION SCRIBE:
   - Architecture decisions are made
   - Results or interpretations emerge
   - Methods or formulations are defined
-- Gale maintains a Typst session log at ~/.brains_in_a_hat/vault/<project>--session-log.typ
+- Gale maintains a markdown session log at ~/.brains_in_a_hat/vault/<project>--session-log.md (Obsidian-viewable, typst blocks for diagrams)
+- Gale proactively creates wiki entries for concepts, techniques, and tools discussed during the session
 - At session end, instruct Gale to finalize the chapter and compile to PDF.
 
 VAULT-CHECK: A PreToolUse hook searches the vault before agent spawns. If prior research
