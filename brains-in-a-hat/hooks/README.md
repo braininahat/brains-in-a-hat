@@ -14,7 +14,8 @@ Claude Code lifecycle hooks for the brains-in-a-hat plugin.
 | `inject-subagent-context` | SubagentStart script — emits PROTOCOLS block plus a precomputed per-agent suffix (RECOMMENDED SKILLS + inline workflow fallbacks for missing skills). Reads from `agent-ctx.cache` built by `refresh-skills-cache` |
 | `refresh-skills-cache` | Scans installed skills once per session, writes three caches: `skills-available.cache`, `skills-missing.cache`, `agent-ctx.cache`. Session-scoped via PID marker |
 | `update-session-state` | PostToolUse[Agent] script — appends spawned agent name to `session-state.json` under a directory-based lock (safe for concurrent sessions) |
-| `block-team-lead-edits` | PreToolUse script — blocks Write, Edit, NotebookEdit, and Bash calls originating from the parent (team-lead) session while team mode is active; subagents pass through freely, and Bash commands inside plugin hooks/skills directories are whitelisted |
+| `enforce-neal-allowlist` | PreToolUse catch-all — enforces Neal's tool allowlist (Read, Grep, Glob, Agent, SendMessage, Task*, Team*, AskUserQuestion, mode tools, Skill, ToolSearch, plugin-infra Bash). Blocks everything else from parent session; subagents unrestricted |
+| `block-team-lead-edits` | **DEPRECATED** — replaced by `enforce-neal-allowlist`. Kept for reference only |
 | `pretool-agent-check` | PreToolUse[Agent] script — enforces sonnet ceiling (blocks opus for team members), advises model tier based on task keywords |
 | `lib-common.sh` | Shared helpers (currently `detect_project_name` — resolves project name via gh or pwd basename) |
 
@@ -69,24 +70,26 @@ PostToolUse[Agent] ──► (two steps)
                          └─ Step 2: update-session-state — locks & updates spawned_agents
                                     in session-state.json
 
-Tool call: Write/Edit/NotebookEdit/Bash
+Any tool call
     │
     ▼
-PreToolUse[Write] ──► (two commands)
-                        ├─ Blocks writes whose file_path is inside $CLAUDE_PLUGIN_ROOT
-                        │  (prevents agents from modifying plugin files)
-                        └─ block-team-lead-edits — blocks the call if originating from
-                           parent session (subagents pass through; plugin bash whitelisted)
+PreToolUse[*] ──► enforce-neal-allowlist
+                   └─ Checks parent session against allowlist (Read, Grep, Glob,
+                      Agent, SendMessage, Task*, Team*, AskUserQuestion, mode tools,
+                      ToolSearch, Skill, plugin-infra Bash). Blocks everything else.
+                      Subagents pass through freely.
 
-PreToolUse[Edit|NotebookEdit|Bash] ──► block-team-lead-edits
-                        └─ Same parent-session blocking as above
+PreToolUse[Write] ──► (plugin-file guard)
+                        └─ Blocks writes whose file_path is inside $CLAUDE_PLUGIN_ROOT
+                           (prevents agents from modifying plugin files)
 
 Session closes
     │
     ▼
 SessionEnd ──► (inline command)
-               └─ Emits additionalContext instructing Neal to spawn session-manager
-                  (background, sonnet) to persist decisions, WIP, and vault updates
+               └─ Emits additionalContext instructing Neal to:
+                  (1) SendMessage Gale to finalize session chapter and compile PDF
+                  (2) Spawn session-manager (background, sonnet) to persist state
 ```
 
 ## Shared Protocols (injected at SubagentStart)

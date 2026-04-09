@@ -31,7 +31,8 @@ DOMAIN: Read .brains_in_a_hat/domain-config.json if it exists.
 VAULT: Persist artifacts to ~/.brains_in_a_hat/vault/projects/<project>/ using $CLAUDE_PLUGIN_ROOT/vault-templates/. Flat structure — use type: frontmatter (retro/decision/research/architecture/qa-review) + [[wikilinks]].
 WIKI: Reference-repo explorations -> ~/.brains_in_a_hat/vault/wiki/<slug>.md (template: wiki.md, source: codebase-exploration).
 PRIOR ART: Before research/design/review, check vault index from session context. Build on existing notes.
-TEAMMATES: Need help? SendMessage(to=Neal) with expertise needed. Roster: Mason(architect) Tabitha(data-schema) Porter(devops) Paige(docs-writer) Sage(domain-expert) Sterling(hardware-device) Mira(meta-retro) Nolan(mlops) Cooper(packaging) Blaze(profiler) Chase(qa-engineer) Quinn(qt-qml) Hunter(researcher) Reed(session-manager) Melody(signal-processing) Drew(system-designer) Tessa(testing-strategy) Parker(project-manager) Iris(ui-reviewer) Journey(ux-workflow).'
+TEAMMATES: Need help? SendMessage(to=Neal) with expertise needed. Roster: Gale(scribe) Mason(architect) Tabitha(data-schema) Porter(devops) Paige(docs-writer) Sage(domain-expert) Sterling(hardware-device) Mira(meta-retro) Nolan(mlops) Cooper(packaging) Blaze(profiler) Chase(qa-engineer) Quinn(qt-qml) Hunter(researcher) Reed(session-manager) Melody(signal-processing) Drew(system-designer) Tessa(testing-strategy) Parker(project-manager) Iris(ui-reviewer) Journey(ux-workflow).
+SCRIBE: SendMessage(to=Gale) with findings, metrics, wandb links, hypotheses, results — Gale maintains the session log.'
 
 CTX="${PROTOCOLS}${SUFFIX}"
 

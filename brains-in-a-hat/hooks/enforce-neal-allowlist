@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# PreToolUse hook: enforce Neal's tool allowlist in team mode.
+# Only the parent session (team lead) is restricted; subagents are unrestricted.
+set -euo pipefail
+
+# Guard: team mode must be active
+ls .brains_in_a_hat/state/active.* &>/dev/null || exit 0
+
+INPUT=$(cat)
+TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null) || exit 0
+TOOL=$(echo "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null) || exit 0
+
+# Subagent -> allow all tools
+if echo "$TRANSCRIPT" | grep -qE '/subagents/agent-[^/]+'; then
+  exit 0
+fi
+
+# Parent session (Neal) — check allowlist
+case "$TOOL" in
+  # Read the codebase
+  Read|Grep|Glob|LS)
+    exit 0 ;;
+  # Delegate work
+  Agent|SendMessage)
+    exit 0 ;;
+  # Task management
+  TaskCreate|TaskUpdate|TaskList|TaskGet|TaskOutput|TaskStop)
+    exit 0 ;;
+  # Team management
+  TeamCreate|TeamDelete)
+    exit 0 ;;
+  # User communication
+  AskUserQuestion)
+    exit 0 ;;
+  # Mode management
+  EnterPlanMode|ExitPlanMode)
+    exit 0 ;;
+  # System tools
+  ToolSearch|Skill)
+    exit 0 ;;
+  # Bash: only allow plugin infrastructure commands (gather-context, record-decision, etc.)
+  Bash)
+    CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null) || true
+    if echo "$CMD" | grep -qE '/brains-in-a-hat/(hooks|skills)/|\.claude/plugins/.+/(hooks|skills)/'; then
+      exit 0
+    fi
+    ;;
+esac
+
+# Block with routing suggestion
+case "$TOOL" in
+  Write|Edit|NotebookEdit)
+    SUGGEST="Paige (docs-writer) for docs, Mason (architect) for code, Gale (scribe) for session log" ;;
+  Bash)
+    SUGGEST="Porter (devops) for git/CI, Chase (qa-engineer) for tests, Reed (session-manager) for state persistence" ;;
+  WebSearch|WebFetch)
+    SUGGEST="Hunter (researcher) for web research" ;;
+  *)
+    SUGGEST="the appropriate specialist agent" ;;
+esac
+
+REASON="Team lead can only read, manage tasks, and delegate. Route ${TOOL} to ${SUGGEST}."
+jq -nc --arg r "$REASON" '{decision:"block", reason:$r}'
+exit 0

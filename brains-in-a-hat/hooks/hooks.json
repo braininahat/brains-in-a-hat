@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "ls .brains_in_a_hat/state/active.* &>/dev/null && printf '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionEnd\",\"additionalContext\":\"Session ending. Spawn session-manager (background, model=sonnet) to persist state: decisions made, WIP items, and vault updates. Use subagent_type=brains-in-a-hat:session-manager.\"}}'"
+            "command": "ls .brains_in_a_hat/state/active.* &>/dev/null && printf '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionEnd\",\"additionalContext\":\"Session ending. (1) SendMessage Gale to finalize session chapter and compile PDF. (2) Spawn session-manager (background, model=sonnet) to persist state: decisions made, WIP items, and vault updates. Use subagent_type=brains-in-a-hat:session-manager.\"}}'"
           }
         ]
       }
@@ -84,15 +84,20 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/enforce-neal-allowlist\""
+          }
+        ]
+      },
+      {
         "matcher": "Write",
         "hooks": [
           {
             "type": "command",
             "command": "INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r '.tool_input.file_path // empty'); PLUGIN_ROOT=\"${CLAUDE_PLUGIN_ROOT:-__unset__}\"; if [ \"$PLUGIN_ROOT\" != \"__unset__\" ] && echo \"$FILE\" | grep -qF \"$PLUGIN_ROOT\"; then echo '{\"decision\":\"block\",\"reason\":\"Cannot modify plugin files from within an agent.\"}'; fi"
-          },
-          {
-            "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/block-team-lead-edits\""
           }
         ]
       },
@@ -102,33 +107,6 @@
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/pretool-agent-check\""
-          }
-        ]
-      },
-      {
-        "matcher": "Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/block-team-lead-edits\""
-          }
-        ]
-      },
-      {
-        "matcher": "NotebookEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/block-team-lead-edits\""
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/block-team-lead-edits\""
           }
         ]
       }
