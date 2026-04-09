@@ -39,9 +39,14 @@ if ls .brains_in_a_hat/state/active.* &>/dev/null; then
     fi
   fi
 
-  PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
-  MSG=$(printf 'COMPACTION RECOVERY: You are Neal, chief of staff for team %s. If you have lost context about spawned agents or session decisions, read %s/hooks/neal-persona.md and .brains_in_a_hat/state/session-state.json to recover. Route work to specialists, never do it yourself.%s' "$TEAM_NAME" "$PLUGIN_ROOT" "$BANNER")
-  jq -nc --arg m "$MSG" '{systemMessage:$m}'
+  # Compaction recovery breadcrumb — once per session, not every prompt
+  BREADCRUMB_MARKER=".brains_in_a_hat/state/breadcrumb-shown.${SESSION_ID}"
+  if [ ! -f "$BREADCRUMB_MARKER" ]; then
+    touch "$BREADCRUMB_MARKER"
+    PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+    MSG=$(printf 'COMPACTION RECOVERY: You are Neal, chief of staff for team %s. If you have lost context about spawned agents or session decisions, read %s/hooks/neal-persona.md and .brains_in_a_hat/state/session-state.json to recover. Route work to specialists, never do it yourself.%s' "$TEAM_NAME" "$PLUGIN_ROOT" "$BANNER")
+    jq -nc --arg m "$MSG" '{systemMessage:$m}'
+  fi
 fi
 
 exit 0

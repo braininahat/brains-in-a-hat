@@ -45,6 +45,13 @@ case "$TOOL" in
       exit 0
     fi
     ;;
+  # Write/Edit: allow plan files (plan mode needs these)
+  Write|Edit)
+    FILE=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null) || true
+    if echo "$FILE" | grep -q '\.claude/plans/'; then
+      exit 0
+    fi
+    ;;
 esac
 
 # Block with routing suggestion
