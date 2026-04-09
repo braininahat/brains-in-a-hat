@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# tmux-to-wezterm shim
+# Intercepts tmux commands from Claude Code and translates to wezterm cli.
+# Install: ln -sf <this-file> ~/.local/bin/tmux
+# Set TMUX=wezterm-shim in ~/.claude/settings.json env block.
+#
+# When $WEZTERM_PANE is set, translates tmux → wezterm cli.
+# When not in WezTerm, passes through to real /usr/bin/tmux.
+
+# Pass through to real tmux if not in WezTerm
+if [ -z "${WEZTERM_PANE:-}" ]; then
+  exec /usr/bin/tmux "$@"
+fi
+
+LOG=".brains_in_a_hat/state/tmux-shim.log"
+mkdir -p "$(dirname "$LOG")" 2>/dev/null
+
+# Log every invocation for debugging
+echo "[$(date -Iseconds)] tmux $*" >> "$LOG" 2>/dev/null
+
+case "$1" in
+  split-window)
+    shift
+    # Parse tmux split-window flags
+    DIRECTION="--bottom"
+    CMD_ARGS=()
+    SKIP_NEXT=false
+    while [ $# -gt 0 ]; do
+      if $SKIP_NEXT; then
+        SKIP_NEXT=false
+        shift
+        continue
+      fi
+      case "$1" in
+        -h) DIRECTION="--right"; shift ;;
+        -v) DIRECTION="--bottom"; shift ;;
+        -p) SKIP_NEXT=true; shift ;;  # -p <percent> — skip, use wezterm default
+        -l) SKIP_NEXT=true; shift ;;  # -l <size> — skip
+        -t) SKIP_NEXT=true; shift ;;  # -t <target> — skip
+        -d) shift ;;                   # don't focus — wezterm default
+        -P) shift ;;                   # print info — ignore
+        -F) SKIP_NEXT=true; shift ;;  # format string — skip
+        --) shift; CMD_ARGS=("$@"); break ;;
+        -*) shift ;;                   # skip unknown flags
+        *)  CMD_ARGS=("$@"); break ;;
+      esac
+    done
+
+    if [ ${#CMD_ARGS[@]} -gt 0 ]; then
+      PANE_ID=$(wezterm cli split-pane $DIRECTION --pane-id "${WEZTERM_PANE:-0}" -- "${CMD_ARGS[@]}" 2>>"$LOG")
+      echo "[$(date -Iseconds)] -> wezterm split-pane $DIRECTION -> pane $PANE_ID" >> "$LOG" 2>/dev/null
+      # Refocus original pane
+      wezterm cli activate-pane --pane-id "${WEZTERM_PANE:-0}" 2>/dev/null
+      # Output pane ID (tmux would print pane info with -P)
+      echo "$PANE_ID"
+    fi
+    ;;
+
+  display-message)
+    # tmux display-message -p '#{pane_count}' — return pane count
+    shift
+    if echo "$*" | grep -q 'pane_count'; then
+      wezterm cli list --format json 2>/dev/null | jq 'length' 2>/dev/null || echo "1"
+    elif echo "$*" | grep -q 'window_width'; then
+      echo "200"  # reasonable default
+    elif echo "$*" | grep -q 'window_height'; then
+      echo "50"
+    else
+      echo ""
+    fi
+    ;;
+
+  list-panes)
+    # Return pane list in tmux-ish format
+    wezterm cli list --format json 2>/dev/null | \
+      jq -r '.[] | "\(.pane_id): [200x50] [\(.title)]"' 2>/dev/null || echo "0: [200x50]"
+    ;;
+
+  select-pane)
+    shift
+    # -t <pane_id>
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -t) wezterm cli activate-pane --pane-id "$2" 2>/dev/null; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    ;;
+
+  kill-pane)
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -t) wezterm cli kill-pane --pane-id "$2" 2>/dev/null; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    ;;
+
+  has-session|new-session|new-window|send-keys|set-option|rename-window)
+    # No-op for commands we don't need
+    echo "[$(date -Iseconds)] no-op: tmux $1 $*" >> "$LOG" 2>/dev/null
+    ;;
+
+  *)
+    echo "[$(date -Iseconds)] unhandled: tmux $*" >> "$LOG" 2>/dev/null
+    ;;
+esac
+
+exit 0
