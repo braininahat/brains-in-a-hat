@@ -47,6 +47,11 @@
           },
           {
             "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/wezterm-pane\" start",
+            "timeout": 5
+          },
+          {
+            "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inject-subagent-context\""
           }
         ]
@@ -63,6 +68,11 @@
           {
             "type": "command",
             "command": "if [ -n \"${ZELLIJ:-}\" ] && ls .brains_in_a_hat/state/active.* &>/dev/null; then INPUT=$(cat); AGENT_NAME=$(echo \"$INPUT\" | jq -r '.name // .agent_type // \"agent\"' 2>/dev/null); SESSION=$(ls -t .brains_in_a_hat/state/active.* 2>/dev/null | head -1); SESSION=\"${SESSION##*/active.}\"; PANE_FILE=\".brains_in_a_hat/state/zellij-pane-${SESSION}-${AGENT_NAME}.id\"; PANE_ID=$(cat \"$PANE_FILE\" 2>/dev/null); if [ -n \"$PANE_ID\" ]; then zellij action rename-pane --pane-id \"$PANE_ID\" \"${AGENT_NAME} [done]\" 2>/dev/null; rm -f \"$PANE_FILE\"; fi; fi"
+          },
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/wezterm-pane\" stop",
+            "timeout": 5
           }
         ]
       }
