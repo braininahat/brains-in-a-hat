@@ -46,10 +46,11 @@ A PreToolUse hook advises when the chosen model looks too expensive for the task
 ## Vault Structure
 
 Flat Obsidian-native vault at `~/.brains_in_a_hat/vault/`:
-- `projects/<project>/` — all project artifacts (flat, no subdirs)
-- `wiki/` — global reusable knowledge (not project-scoped)
+- All notes at root — categorized by `type:` and `project:` frontmatter properties
+- `attachments/` — images, plots, wandb exports
+- No `projects/` or `wiki/` subdirs — properties replace paths
 
-Files are categorized by `type:` frontmatter (retro, decision, research, architecture, qa-review), not directories. All vault files use Dataview frontmatter (`type`, `project`, `agents`, `date`, `tags`, `status`) and `[[wikilinks]]`.
+All vault files use Dataview frontmatter (`type`, `project`, `agents`, `date`, `tags`, `status`) and `[[wikilinks]]`. Use `vault_find <type> [<project>]` helper in hooks to search by property.
 
 ## Neal's Tool Restrictions
 
@@ -64,7 +65,7 @@ Agents are spawned on demand, not at session start — except Gale (scribe), who
 
 ## Session Scribe (Gale)
 
-Gale maintains a Typst session log at `~/.brains_in_a_hat/vault/projects/<project>/session-log.typ`. Spawned at team activation, kept alive via SendMessage. Records hypotheses, methods, metrics, wandb links, results, interpretations, and related work. Each session is a timestamped chapter. Compiles to PDF at session end.
+Gale maintains a Typst session log at `~/.brains_in_a_hat/vault/<project>--session-log.typ`. Spawned at team activation, kept alive via SendMessage. Records hypotheses, methods, metrics, wandb links, results, interpretations, and related work. Each session is a timestamped chapter. Compiles to PDF at session end.
 
 ## Plan Mode
 

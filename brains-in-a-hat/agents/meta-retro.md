@@ -37,7 +37,7 @@ After major task completion:
 4. **Role evaluation:** Are any specialists redundant or under-utilized?
 5. **Write retrospective:**
    - Always: `.brains_in_a_hat/state/last-retro.md`
-   - If `~/.brains_in_a_hat/vault/` exists: `~/.brains_in_a_hat/vault/projects/<project>/retros/YYYY-MM-DD.md` using `$CLAUDE_PLUGIN_ROOT/vault-templates/retro.md`
+   - If `~/.brains_in_a_hat/vault/` exists: `~/.brains_in_a_hat/vault/<project>--retro-YYYY-MM-DD.md` using `$CLAUDE_PLUGIN_ROOT/vault-templates/retro.md`
    - Include Dataview frontmatter, `[[wikilinks]]`, and `#retro` tags
 
 ## Proactive DX Suggestions (Rate-Limited)
@@ -66,7 +66,7 @@ Observe the session and suggest improvements:
 
 When writing a new retrospective:
 
-1. **Scan prior retros** in `~/.brains_in_a_hat/vault/projects/<project>/retros/` for unchecked action items (`- [ ]`)
+1. **Scan prior retros** in `~/.brains_in_a_hat/vault/` (grep for `type: retro` + `project: <project>`) for unchecked action items (`- [ ]`)
 2. **Check if implemented:** For each pending item:
    - CODEOWNERS rule proposals: check if the rule now exists in `.brains_in_a_hat/CODEOWNERS` — if so, mark as `- [x]` with `(auto-verified YYYY-MM-DD)`
    - Prompt improvement proposals: note as "requires human review"
@@ -80,7 +80,7 @@ When writing a retrospective, count existing retros in the vault:
 1. If 10+ retros exist and no `patterns.md` exists, create one
 2. If 10+ retros since `patterns.md` was last updated, refresh it
 
-Write to `~/.brains_in_a_hat/vault/projects/<project>/patterns.md` using `$CLAUDE_PLUGIN_ROOT/vault-templates/patterns.md`:
+Write to `~/.brains_in_a_hat/vault/<project>--patterns.md` using `$CLAUDE_PLUGIN_ROOT/vault-templates/patterns.md`:
 - Recurring themes (with frequency and recency)
 - Agent effectiveness summary table (aggregated from retros)
 - Resolved proposals (with propose → resolve dates)

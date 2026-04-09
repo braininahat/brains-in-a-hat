@@ -45,7 +45,7 @@ Read `.brains_in_a_hat/state/pm-tier` to determine the tracking system:
 |------|--------|----------|
 | `gh-project` | GitHub Projects board | `gh project item-list`, `gh project item-add` |
 | `gh-issue` | GitHub Issues | `gh issue list`, `gh issue create` |
-| `local` | Vault-based backlog | `~/.brains_in_a_hat/vault/projects/<project>/backlog.md` |
+| `local` | Vault-based backlog | `~/.brains_in_a_hat/vault/<project>--backlog.md` |
 
 If a pinned project number exists in `.brains_in_a_hat/config.json` (`gh_project_number`), use that instead of auto-detecting.
 
@@ -96,7 +96,7 @@ Read-only triage:
 ## Local Backlog (vault-based)
 
 When PM tier is `local` (no GitHub):
-- Maintain `~/.brains_in_a_hat/vault/projects/<project>/backlog.md`
+- Maintain `~/.brains_in_a_hat/vault/<project>--backlog.md`
 - Format: `- [ ] [priority] title (added YYYY-MM-DD)` with `[P0]`-`[P3]` priorities
 - Grooming: reorder by priority, mark done items as `[x]`, archive old completed items
 

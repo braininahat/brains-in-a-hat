@@ -68,14 +68,14 @@ When research reveals something novel — a new algorithm, unique approach, or c
 ## Vault Writing
 
 Write research findings to vault if `~/.brains_in_a_hat/vault/` exists:
-- `~/.brains_in_a_hat/vault/projects/<project>/research/<topic-slug>.md`
+- `~/.brains_in_a_hat/vault/<topic-slug>.md` with `type: research` and `project:` frontmatter
 - Use `$CLAUDE_PLUGIN_ROOT/vault-templates/research.md` format
 - Include Dataview frontmatter and `[[wikilinks]]`
 
 ## Wiki Writing
 
 After completing web research, also write a wiki note to capture reusable knowledge:
-- Path: `~/.brains_in_a_hat/vault/wiki/<topic-slug>.md`
+- Path: `~/.brains_in_a_hat/vault/<topic-slug>.md` with `type: wiki` frontmatter
 - Use `$CLAUDE_PLUGIN_ROOT/vault-templates/wiki.md` format
 - Source: `web-research`
 - Include all URLs consulted in Sources

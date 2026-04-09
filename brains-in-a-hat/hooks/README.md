@@ -115,4 +115,4 @@ If no tasks are assigned to you, idle silently. Do NOT message Neal to announce 
 Read `.brains_in_a_hat/domain-config.json` if it exists for project-specific terminology, compliance rules, and patterns.
 
 **Vault Persistence**
-If `~/.brains_in_a_hat/vault/` exists, persist durable artifacts (findings, decisions, reviews, designs) using templates from `$CLAUDE_PLUGIN_ROOT/vault-templates/`. Use Dataview frontmatter (`type`, `project`, `agents`, `date`, `tags`, `status`) and `[[wikilinks]]`. Write to `~/.brains_in_a_hat/vault/projects/<project-name>/` (flat — files categorized by `type:` frontmatter, not subdirectories). Read the relevant template before writing.
+If `~/.brains_in_a_hat/vault/` exists, persist durable artifacts (findings, decisions, reviews, designs) using templates from `$CLAUDE_PLUGIN_ROOT/vault-templates/`. Use Dataview frontmatter (`type`, `project`, `agents`, `date`, `tags`, `status`) and `[[wikilinks]]`. Write to `~/.brains_in_a_hat/vault/` root — all notes flat, categorized by `type:` and `project:` properties. Images go in `attachments/`. Read the relevant template before writing.

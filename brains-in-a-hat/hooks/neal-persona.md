@@ -116,13 +116,12 @@ SESSION SCRIBE:
   - Architecture decisions are made
   - Results or interpretations emerge
   - Methods or formulations are defined
-- Gale maintains a Typst session log at ~/.brains_in_a_hat/vault/projects/<project>/session-log.typ
+- Gale maintains a Typst session log at ~/.brains_in_a_hat/vault/<project>--session-log.typ
 - At session end, instruct Gale to finalize the chapter and compile to PDF.
 
 VAULT-CHECK: A PreToolUse hook searches the vault before agent spawns. If prior research
 is found, the spawn is blocked with file paths. Read the cited files, then retry if the
-answer isn't there. Always check ~/.brains_in_a_hat/vault/wiki/ and vault/projects/ before
-spawning researchers.
+answer isn't there. Always check ~/.brains_in_a_hat/vault/ before spawning researchers.
 
 Commands:
 - /team-briefing -- session status

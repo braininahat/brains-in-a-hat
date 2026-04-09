@@ -106,8 +106,9 @@ gather_issues() {
     local)
       local project_name
       project_name=$(detect_project_name)
-      local backlog="${VAULT_DIR}/projects/${project_name}/backlog.md"
-      if [ -f "${backlog}" ]; then
+      local backlog
+      backlog=$(vault_find backlog "$project_name" | head -1)
+      if [ -n "${backlog}" ] && [ -f "${backlog}" ]; then
         head -20 "${backlog}"
       else
         echo "No local backlog yet"
@@ -138,17 +139,17 @@ gather_memory() {
 gather_vault_state() {
   local project_name
   project_name=$(detect_project_name)
-  local project_vault="${VAULT_DIR}/projects/${project_name}"
 
   local retro
-  retro=$(grep -rl '^type: retro$' "${project_vault}/"*.md 2>/dev/null | xargs ls -t 2>/dev/null | head -1)
+  retro=$(vault_find retro "$project_name" | head -1)
   if [ -n "${retro}" ]; then
     printf 'Last retro: %s\n' "$(basename "${retro}")"
     head -5 "${retro}" 2>/dev/null
   fi
 
-  local patterns="${project_vault}/patterns.md"
-  if [ -f "${patterns}" ]; then
+  local patterns
+  patterns=$(vault_find patterns "$project_name" | head -1)
+  if [ -n "${patterns}" ] && [ -f "${patterns}" ]; then
     printf '\nPatterns summary: %s (updated %s)\n' \
       "$(basename "${patterns}")" \
       "$(date -r "${patterns}" +%Y-%m-%d 2>/dev/null || stat -c %y "${patterns}" 2>/dev/null | cut -d' ' -f1)"
@@ -158,11 +159,9 @@ gather_vault_state() {
 gather_pending_proposals() {
   local project_name
   project_name=$(detect_project_name)
-  local project_vault="${VAULT_DIR}/projects/${project_name}"
-  [ -d "${project_vault}" ] || return 0
 
   local retro_files
-  retro_files=$(grep -rl '^type: retro$' "${project_vault}/"*.md 2>/dev/null | xargs ls -t 2>/dev/null)
+  retro_files=$(vault_find retro "$project_name")
   [ -n "${retro_files}" ] || return 0
 
   local escalated=()
@@ -207,13 +206,11 @@ gather_pending_proposals() {
 gather_vault_index() {
   local project_name
   project_name=$(detect_project_name)
-  local project_vault="${VAULT_DIR}/projects/${project_name}"
-  [ -d "${project_vault}" ] || return 0
   local output=""
 
   for doc_type in decision research architecture qa-review; do
     local files
-    files=$(grep -rl "^type: ${doc_type}$" "${project_vault}/"*.md 2>/dev/null | xargs ls -t 2>/dev/null)
+    files=$(vault_find "$doc_type" "$project_name")
     [ -z "${files}" ] && continue
 
     local entries=()
@@ -261,7 +258,7 @@ build_context() {
   local context=""
   context+="## Project: ${project_name}\n"
   context+="PM tier: ${pm_tier}\n"
-  context+="Vault: ~/.brains_in_a_hat/vault/projects/${project_name}/\n\n"
+  context+="Vault: ~/.brains_in_a_hat/vault/ (project: ${project_name})\n\n"
 
   context+="## Git State\n$(gather_git_data)\n\n"
   context+="## Backlog (${pm_tier})\n$(gather_issues "${pm_tier}")\n\n"

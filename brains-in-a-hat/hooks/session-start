@@ -51,26 +51,20 @@ dashboard_start() {
 # ── Directory bootstrap ──────────────────────────────────────────────
 
 bootstrap_dirs() {
-  # Global vault structure (projects/ + wiki/ — flat, Obsidian-native)
-  if [ ! -d "${VAULT_DIR}" ]; then
-    mkdir -p "${VAULT_DIR}/projects"
-  fi
-  mkdir -p "${VAULT_DIR}/wiki"
+  # Flat Obsidian-native vault — all notes at root, properties for categorization
+  mkdir -p "${VAULT_DIR}"
+  mkdir -p "${VAULT_DIR}/attachments"
 
   # Project-local plugin dirs
   mkdir -p "${PROJECT_CONFIG}"
   mkdir -p "${STATE_DIR}"
 
-  # Project vault (flat — all files use type: frontmatter)
+  # Dashboard note for Obsidian Dataview (at vault root, project-prefixed)
   local project_name
   project_name=$(detect_project_name)
-  local project_vault="${VAULT_DIR}/projects/${project_name}"
-  mkdir -p "${project_vault}"
-
-  # Dashboard note for Obsidian Dataview
-  local dashboard_note="${project_vault}/dashboard.md"
+  local dashboard_note="${VAULT_DIR}/${project_name}--dashboard.md"
   if [ ! -f "${dashboard_note}" ]; then
-    cp "${PLUGIN_ROOT}/vault-templates/dashboard.md" "${dashboard_note}" 2>/dev/null || true
+    sed "s/{{project}}/${project_name}/g" "${PLUGIN_ROOT}/vault-templates/dashboard.md" > "${dashboard_note}" 2>/dev/null || true
   fi
 
   # CODEOWNERS (project-local, committable)
@@ -111,7 +105,8 @@ GITIGNORE
 {
   "promptDelete": false,
   "alwaysUpdateLinks": true,
-  "newLinkFormat": "relative"
+  "newLinkFormat": "relative",
+  "attachmentFolderPath": "attachments"
 }
 OBSIDIAN
   fi
