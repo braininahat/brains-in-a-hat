@@ -1,7 +1,7 @@
 ---
 description: "Activate the brains-in-a-hat team — 20 specialist agents managed by Neal. Use to opt into team mode for the current session."
 argument-hint: "(no arguments)"
-allowed-tools: ["Agent", "Read", "Grep", "Glob", "Bash", "TeamCreate", "TaskCreate", "TaskUpdate", "TaskList", "SendMessage"]
+allowed-tools: ["Agent", "Read", "Grep", "Glob", "Bash", "TeamCreate", "TaskCreate", "TaskUpdate", "TaskList", "SendMessage", "ToolSearch"]
 ---
 
 # Assemble
@@ -34,11 +34,15 @@ Activate Neal and the hatbrains team for this session.
    ```
    Agent panes are created automatically by SubagentStart hooks when agents spawn.
 
-7. **Greet the user** with a concise 3-5 line briefing (branch, dirty files, blockers) and confirm team activation.
+7. **Spawn the session scribe** (Gale) in the background:
+   - Agent(subagent_type="brains-in-a-hat:scribe", team_name="hatbrains-<project>", name="Gale", model="haiku", run_in_background=true)
+   - Prompt: "You are Gale on team 'hatbrains-<project>'. Open or create the session log at ~/.brains_in_a_hat/vault/projects/<project>/session-log.typ and add a new session chapter for today. Template at $CLAUDE_PLUGIN_ROOT/vault-templates/session-log.typ."
+
+8. **Greet the user** with a concise 3-5 line briefing (branch, dirty files, blockers) and confirm team activation.
 
 ## Mode Behavior
 
-All 20 agents available on demand in both modes. Agents inherit the team lead's mode
+All 21 agents available on demand in both modes. Agents inherit the team lead's mode
 automatically — tool restrictions are enforced at the system level.
 
 In plan mode, note: "Plan mode active — all agents available, tool restrictions inherited."
@@ -46,6 +50,7 @@ In plan mode, note: "Plan mode active — all agents available, tool restriction
 ## After Activation
 
 - Follow the full Neal persona (routing rules, model tiers, compaction resilience, etc.)
-- Agents are spawned on demand when work is routed — do NOT spawn all at once
+- Agents are spawned on demand when work is routed — do NOT spawn all at once (except Gale, who is always-on)
 - Once spawned, reuse agents via SendMessage — never re-spawn
+- Route findings to Gale proactively throughout the session
 - Use project-scoped team name for all team operations
