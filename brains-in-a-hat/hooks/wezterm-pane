@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# WezTerm pane management for per-agent activity feeds.
+# Usage: wezterm-pane start|stop
+#
+# Layout progression (max 4 rows per column):
+#   Claude Code pane is always leftmost, single row, never split.
+#   1st agent:  [CC | A1]
+#   2nd agent:  [CC | A1 / A2]
+#   3rd-4th:    [CC | A1 / A2 / A3 / A4]
+#   5th agent:  [CC | A1-4 | A5]              (new column)
+#   6th-8th:    [CC | A1-4 | A5 / A6 / A7 / A8]
+#   Max 4 rows per column. New column every 4 agents.
+set -euo pipefail
+
+[ -n "${WEZTERM_PANE:-}" ] || exit 0
+ls .brains_in_a_hat/state/active.* &>/dev/null || exit 0
+command -v wezterm &>/dev/null || exit 0
+
+ACTION="${1:-}"
+INPUT=$(cat)
+AGENT_NAME=$(echo "$INPUT" | jq -r '.name // .agent_type // "agent"' 2>/dev/null) || exit 0
+SESSION=$(ls -t .brains_in_a_hat/state/active.* 2>/dev/null | head -1)
+SESSION="${SESSION##*/active.}"
+STATE=".brains_in_a_hat/state"
+PANE_FILE="${STATE}/wezterm-pane-${SESSION}-${AGENT_NAME}.id"
+ACTIVITY="$(pwd)/${STATE}/activity.jsonl"
+COLS_FILE="${STATE}/wezterm-cols-${SESSION}.json"
+MAX_ROWS=4
+
+# Tail command for a specific agent's activity
+agent_tail() {
+  local name="$1"
+  printf "printf '\\\\033[1;36m%s\\\\033[0m\\\\n' && tail -f '%s' 2>/dev/null | jq --unbuffered -r 'select(.agent==\"%s\" or .agent==\"brains-in-a-hat:%s\") | \"\\(.ts | split(\"T\")[1] | split(\"+\")[0] | split(\"-\")[0]) \\(.event) — \\(.detail)\"' || sleep infinity" "$name" "$ACTIVITY" "$name" "$name"
+}
+
+case "$ACTION" in
+  start)
+    # Initialize column tracking: array of column anchor pane IDs
+    if [ ! -f "$COLS_FILE" ]; then
+      echo '{"cols":[],"count":0}' > "$COLS_FILE"
+    fi
+
+    COUNT=$(jq -r '.count' "$COLS_FILE")
+    COL_IDX=$((COUNT / MAX_ROWS))
+    ROW_IDX=$((COUNT % MAX_ROWS))
+
+    TAIL_CMD=$(agent_tail "$AGENT_NAME")
+
+    if [ "$ROW_IDX" -eq 0 ]; then
+      # New column needed
+      if [ "$COL_IDX" -eq 0 ]; then
+        # First column: split right from Claude pane
+        NEW_PANE=$(wezterm cli split-pane --right --pane-id "$WEZTERM_PANE" \
+          -- bash -c "$TAIL_CMD" 2>/dev/null) || exit 0
+      else
+        # Additional columns: split right from the last pane in prev column
+        PREV_COL_ANCHOR=$(jq -r ".cols[$((COL_IDX - 1))]" "$COLS_FILE")
+        NEW_PANE=$(wezterm cli split-pane --right --pane-id "$PREV_COL_ANCHOR" \
+          -- bash -c "$TAIL_CMD" 2>/dev/null) || exit 0
+      fi
+      # Record this as the column anchor
+      jq --argjson idx "$COL_IDX" --argjson pane "$NEW_PANE" \
+        '.cols[$idx] = $pane | .count += 1' "$COLS_FILE" > "${COLS_FILE}.tmp" && \
+        mv "${COLS_FILE}.tmp" "$COLS_FILE"
+    else
+      # Add row within current column: split bottom from the column anchor
+      COL_ANCHOR=$(jq -r ".cols[$COL_IDX]" "$COLS_FILE")
+      NEW_PANE=$(wezterm cli split-pane --bottom --pane-id "$COL_ANCHOR" \
+        -- bash -c "$TAIL_CMD" 2>/dev/null) || exit 0
+      jq '.count += 1' "$COLS_FILE" > "${COLS_FILE}.tmp" && \
+        mv "${COLS_FILE}.tmp" "$COLS_FILE"
+    fi
+
+    [ -n "${NEW_PANE:-}" ] && echo "$NEW_PANE" > "$PANE_FILE"
+
+    # Refocus Claude's pane
+    wezterm cli activate-pane --pane-id "$WEZTERM_PANE" 2>/dev/null || true
+    ;;
+
+  stop)
+    # Inject a done marker into the activity log (the tail will pick it up)
+    jq -nc --arg ts "$(date -Iseconds)" --arg agent "$AGENT_NAME" --arg session "$SESSION" \
+      '{ts:$ts,agent:$agent,session:$session,event:"✓ done",detail:"completed"}' \
+      >> "$ACTIVITY" 2>/dev/null || true
+    ;;
+esac

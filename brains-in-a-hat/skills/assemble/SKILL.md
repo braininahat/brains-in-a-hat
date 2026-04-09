@@ -24,15 +24,9 @@ Activate Neal and the hatbrains team for this session.
 
 5. **Detect plan mode**: Check if a system reminder says plan mode is active.
 
-6. **Zellij integration** (optional): If running inside zellij (`$ZELLIJ` is set), create a hatbrains tab with an activity feed:
-   ```bash
-   if [ -n "${ZELLIJ}" ]; then
-     zellij action new-tab --name "hatbrains"
-     zellij action new-pane --name "Activity Feed" \
-       -- tail -f .brains_in_a_hat/state/activity.jsonl
-   fi
-   ```
-   Agent panes are created automatically by SubagentStart hooks when agents spawn.
+6. **Terminal integration** (optional): Per-agent activity panes are created automatically by SubagentStart hooks.
+   - **Zellij** (`$ZELLIJ` set): creates floating panes per agent
+   - **WezTerm** (`$WEZTERM_PANE` set): creates a grid layout — right split at 2/3 width, max 4 rows per column, new columns for overflow. Each agent gets its own pane filtered to its activity.
 
 7. **Spawn the session scribe** (Gale) in the background:
    - Agent(subagent_type="brains-in-a-hat:scribe", team_name="hatbrains-<project>", name="Gale", model="haiku", run_in_background=true)

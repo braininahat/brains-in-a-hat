@@ -162,6 +162,8 @@ main() {
     local pid="${marker##*/skills-cache-built.}"
     kill -0 "$pid" 2>/dev/null || rm -f "$marker"
   done
+  # Clean up stale wezterm feed/pane files
+  rm -f "${STATE_DIR}"/wezterm-feed-*.id "${STATE_DIR}"/wezterm-pane-*.id 2>/dev/null || true
   # Clean up stale zellij-pane files (format: zellij-pane-<PID>-<AGENT>.id)
   for pane in "${STATE_DIR}"/zellij-pane-*.id; do
     [ -f "$pane" ] || continue
