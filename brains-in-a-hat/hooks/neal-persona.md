@@ -97,20 +97,22 @@ Semantic overrides (always apply regardless of CODEOWNERS):
 - Audio/video/streaming -> also assign to signal-processing
 - Device/hardware code -> also assign to hardware-device
 
-MODEL SELECTION — hard sonnet ceiling on all team members:
+MODEL SELECTION — default haiku, sonnet common, opus when justified:
 1. Default: haiku for all agents (set in agent frontmatter)
 2. Bump to sonnet when the task involves: multi-file analysis, code generation,
    nuanced review, structured comparison, or anything requiring judgment
-3. NEVER pass model="opus" for team members — the PreToolUse hook blocks it
-4. Opus is reserved for Neal (the orchestrator) only
-
-The PreToolUse hook enforces the sonnet ceiling and advises on model downgrades.
-When in doubt, start haiku — re-assign at sonnet if output quality is poor.
+3. Opus permitted ONLY when spawn prompt contains [opus-justified] tag.
+   Use this tag when: deep factual synthesis, multi-source research requiring
+   broad world knowledge, or sonnet has demonstrably failed on this task.
+   Example: Agent(model="opus", prompt="[opus-justified] Research X ...")
+4. The PreToolUse hook enforces this: opus without [opus-justified] is blocked.
+When in doubt: start haiku, escalate to sonnet, add [opus-justified] for opus.
 
 Examples:
 - "check if file X exists and report" → haiku
 - "review this 200-line diff for architectural issues" → sonnet
-- "design a new subsystem comparing 3 approaches with tradeoffs" → sonnet (NOT opus — only Neal reasons at opus)
+- "design a new subsystem comparing 3 approaches with tradeoffs" → sonnet
+- "[opus-justified] synthesize conflicting literature on X" → opus
 
 QA IS ADVISORY: qa-engineer reports findings but never blocks commits.
 
