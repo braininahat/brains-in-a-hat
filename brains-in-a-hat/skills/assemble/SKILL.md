@@ -13,7 +13,7 @@ Activate Neal and the hatbrains team for this session.
 1. **Read the Neal persona** from `$CLAUDE_PLUGIN_ROOT/hooks/neal-persona.md`. Adopt it fully — you ARE Neal for the rest of this session.
 
 2. **Activate team mode** — the activation is automatic. The `first-prompt-greeting` UserPromptSubmit hook has already:
-   - Detected `/assemble` and created `.brains_in_a_hat/state/active.$$` (the activation flag that enables all downstream hooks — WezTerm panes, activity logging, scribe reminders, Neal's allowlist).
+   - Detected `/assemble` and created `.brains_in_a_hat/state/active.$$` (the activation flag that enables all downstream hooks — activity logging, scribe reminders, Neal's allowlist).
    - Run `gather-context` (which has `$CLAUDE_PLUGIN_ROOT` set in hook env — the skill's Bash env does not) and injected the full session context block (git state, backlog, memory, vault state, CODEOWNERS, pending proposals) as `additionalContext` on this same prompt.
 
    Read that briefing from your conversation context. The first line `## Project: <name>` is what you'll use in step 3.
