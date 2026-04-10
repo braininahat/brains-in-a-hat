@@ -136,7 +136,7 @@ model_check() {
   fi
 }
 
-# ── Sonnet Ceiling ──────────────────────────────────────────────────
+# ── Opus Gate ───────────────────────────────────────────────────────
 
 sonnet_ceiling() {
   local agent_type
@@ -145,10 +145,11 @@ sonnet_ceiling() {
   # Only enforce for brains-in-a-hat team members
   echo "$agent_type" | grep -q '^brains-in-a-hat:' || return 0
 
-  # Block opus — team members run at haiku (default) or sonnet max
+  # Opus permitted when spawn prompt contains [opus-justified] tag
   case "${MODEL:-}" in
     opus*)
-      printf '{"decision":"block","reason":"Sonnet ceiling: team members run at haiku (default) or sonnet. Use model=\"sonnet\" for complex tasks, or omit for haiku."}'
+      echo "$PROMPT" | grep -qF '[opus-justified]' && return 0
+      printf '{"decision":"block","reason":"Opus ceiling: team members run haiku (default) or sonnet. Add [opus-justified] to the spawn prompt to escalate to opus for factually demanding tasks."}'
       exit 0
       ;;
   esac
