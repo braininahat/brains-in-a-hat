@@ -6,16 +6,15 @@ Claude Code plugin providing a 21-agent team ("hatbrains") managed by Neal, chie
 
 - `agents/` — agent definitions (one `.md` per specialist, 21 total)
 - `hooks/` — lifecycle hooks and persona (`hooks.json` wiring, `session-start` bootstrap, `neal-persona.md` brain)
-- `commands/` — user-invocable slash commands (team-briefing, team-debrief, team-retro, team-review, team-cleanup)
+- `commands/` — user-invocable slash commands (`retro`, `review`, `cleanup`; most lifecycle events are now auto-triggered via hooks, not manual commands)
 - `skills/` — auto-loaded Claude Code skills (`assemble/` — activates the team)
-- `vault-templates/` — Obsidian-compatible templates for persistent artifacts (retro, decision, research, architecture, qa-review, patterns, dashboard)
+- `vault-templates/` — Obsidian-compatible templates for persistent artifacts (retro, decision, research, architecture, qa-review, patterns, session-log, wiki, workflow)
 - `examples/` — example configs copied on first run (user-preferences.json, domain-config.json)
-- `dashboard/` — global dashboard server (port 8787)
 - `.claude-plugin/` — plugin manifest (plugin.json)
 
 ## Naming Conventions
 
-- All file names: kebab-case (`session-manager.md`, `team-briefing`, `qa-review.md`)
+- All file names: kebab-case (`session-manager.md`, `meta-retro.md`, `qa-review.md`)
 - Agent names in roster: PascalCase single names (`Mason`, `Reed`, `Paige`)
 - Team name: `hatbrains-<project>` (e.g., `hatbrains-brains-in-a-hat`) — resolved at runtime via `detect_project_name()` in `hooks/lib-common.sh`
 
@@ -27,11 +26,15 @@ Plus tool-level hooks: `PreToolUse`, `PostToolUse`
 
 ## Key Files
 
-- `hooks/neal-persona.md` — Neal's full prompt: team roster, routing rules, plan mode, model tiers
-- `hooks/session-start` — bootstrap script (vault dirs, dashboard, stale-state cleanup); no persona injection — that happens via `/assemble`
-- `hooks/first-prompt-greeting` — detects `/assemble`, creates active flag, injects compaction-recovery breadcrumb
-- `hooks/hooks.json` — hook wiring (all lifecycle events)
-- `hooks/enforce-neal-allowlist` — PreToolUse catch-all: restricts Neal to read + delegate + tasks only
+- `hooks/neal-persona.md` — Neal's full prompt: team roster, routing rules, task-list primacy, plan mode, model tiers, retro automation, pivot detection
+- `hooks/session-start` — bootstrap script (vault dirs, stale-state cleanup, source==compact detection); no persona injection — that happens via `/assemble`
+- `hooks/first-prompt-greeting` — detects `/assemble`, creates active flag, injects `gather-context` briefing, emits compaction recovery + retro-due + post-mortem instructions, injects CURRENT FOCUS on every prompt
+- `hooks/hooks.json` — hook wiring (all lifecycle events: UserPromptSubmit, SessionStart, SessionEnd, PreCompact, SubagentStart, SubagentStop, PreToolUse, PostToolUse)
+- `hooks/enforce-neal-allowlist` — PreToolUse catch-all: restricts Neal to read + delegate + tasks + curated read-only Bash; subagents bypass via in-subagent.* markers
+- `hooks/inject-subagent-context` — SubagentStart: emits PROTOCOLS block + SHARED CONTEXT (curated by Gale) + per-agent skills suffix
+- `agents/scribe.md` — Gale's persona: session log + shared-context curator
+- `agents/meta-retro.md` — Mira's persona: checkpoint + final retro modes with concurrency lock
+- `agents/session-manager.md` — Reed's persona: briefing + persist modes (no retro writing — that's Mira's job)
 
 ## Model Tiers
 
@@ -54,10 +57,25 @@ All vault files use Dataview frontmatter (`type`, `project`, `agents`, `date`, `
 
 ## Neal's Tool Restrictions
 
-Neal (parent session in team mode) operates under a strict allowlist enforced by `enforce-neal-allowlist`:
-- **Allowed**: Read, Grep, Glob, LS, Agent, SendMessage, Task*, Team*, AskUserQuestion, EnterPlanMode, ExitPlanMode, ToolSearch, Skill, Bash (plugin infrastructure only)
-- **Blocked**: Write, Edit, NotebookEdit, Bash (non-plugin), WebSearch, WebFetch, everything else
-- Subagents are unrestricted — the allowlist only applies to the parent session
+Neal (parent session in team mode) operates under an allowlist enforced by `hooks/enforce-neal-allowlist`:
+- **Allowed**: Read, Grep, Glob, LS, Agent, SendMessage, Task*, Team*, AskUserQuestion, EnterPlanMode, ExitPlanMode, ToolSearch, Skill, Bash (plugin infrastructure + curated read-only: `gh list/view/api/search`, `git log/status/diff/show/blame/config --get`, `ls`, `cat`, `head`, `tail`, `wc`, `file`, `pwd`, `whoami`, `date`, with shell metacharacters rejected)
+- **Blocked**: Write, Edit, NotebookEdit, WebSearch, WebFetch, destructive Bash (anything containing `;`, `|`, `&`, `>`, `$`, backticks, or not on the read-only allowlist)
+- Subagents bypass the allowlist. Detection is via `.brains_in_a_hat/state/in-subagent.<id>` marker files written by `SubagentStart` and removed by `SubagentStop`; if any such marker exists, the hook exits allow. This replaces the prior `transcript_path` regex which was dead code (the PreToolUse transcript_path refers to the parent session, not the subagent, so the old regex never matched).
+
+## Automation
+
+The plugin is built around `/assemble` being the **only manual command you ever type**. Everything else fires automatically via lifecycle hooks:
+
+- **Session briefing** — `/assemble` triggers `first-prompt-greeting`, which runs `gather-context` and injects the full briefing as `additionalContext` in one shot. No separate `/team-briefing` command (deleted).
+- **Compaction recovery** — `PreCompact` writes `compact-pending.<sid>`; on the next prompt, `first-prompt-greeting` emits a `COMPACTION RECOVERY` systemMessage instructing Neal to re-read session-state.json and activity.jsonl.
+- **Checkpoint retro** — same `PreCompact` also writes `retro-pending.<sid>="checkpoint"`; post-compact `first-prompt-greeting` instructs Neal to spawn Mira in `mode=checkpoint` (fire-and-forget, background).
+- **Final retro** — `SessionEnd` writes `retro-pending.<sid>="final"` and instructs Neal to spawn Mira (`mode=final`) + Reed (`mode=persist`) + Gale-finalize all in parallel. Reed handles decision promotion + preferences; Mira handles retrospective writing (stripped from Reed to eliminate duplication).
+- **Session end snapshot** — `SessionEnd` also copies `session-state.json` to `session-end-snapshot.json` as a durable safety net. If the previous session ended without Neal actioning the fanout, the next session's `first-prompt-greeting` detects the snapshot and instructs Neal to spawn Reed(mode=persist) to process it.
+- **Shared context curator** — Gale writes to `session-state.json` (findings, active_tasks, current_focus, warnings, open_questions) on every significant SendMessage under a directory lock. `inject-subagent-context` reads this on every SubagentStart and emits a `SHARED CONTEXT` block so new team members inherit team state for free.
+- **Pivot detection** — `first-prompt-greeting` injects `CURRENT FOCUS: <value>` on every prompt when team is active. Neal compares new prompts against current_focus and suggests `/compact` when a significant pivot is detected.
+- **Advisory vault-check** — `pretool-agent-check` emits a `VAULT HINT` as `additionalContext` instead of blocking the spawn. The spawned agent decides whether to read the cited files.
+
+**Manual escape hatches** (if you want to force a lifecycle action): `/retro` (mid-task retro on demand), `/review` (pre-commit QA advisory), `/cleanup` (opportunistic hygiene sweep). None of these are lifecycle-driven — use them when you explicitly want to.
 
 ## Agent Spawning
 

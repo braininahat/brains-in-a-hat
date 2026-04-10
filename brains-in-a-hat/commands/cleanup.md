@@ -1,10 +1,12 @@
 ---
-name: team-cleanup
-description: "Find dead code, unused imports, stale TODOs, inconsistent naming, and propose cleanup."
+name: cleanup
+description: "Manual codebase hygiene sweep — dead code, unused imports, stale TODOs, inconsistent naming. Not lifecycle-automated."
 allowed-tools: ["Agent", "Read", "Grep", "Glob", "LSP"]
 ---
 
-# Team Cleanup
+# Cleanup
+
+Manual only. Opportunistic hygiene sweep, not lifecycle-driven.
 
 Run a codebase hygiene sweep to find cleanup opportunities.
 

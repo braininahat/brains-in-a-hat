@@ -2,6 +2,10 @@
 # Update session-state.json atomically with a directory-based lock.
 # Reads stdin JSON (Claude Code tool-use input), extracts agent name,
 # appends to spawned_agents, updates last_updated. Safe under concurrent sessions.
+#
+# Schema preserved:
+#   spawned_agents[], decisions[], last_updated,
+#   current_focus, active_tasks[], findings[], open_questions[], warnings[]
 set -euo pipefail
 
 # Only update when team is active
@@ -30,10 +34,16 @@ done
 # Ensure lock is removed even on script failure
 trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
 
-# Initialize state file if absent
-[ -f "$STATE" ] || echo '{"spawned_agents":[],"decisions":[],"last_updated":""}' > "$STATE"
-# Ensure decisions field exists in older state files
-jq 'if has("decisions") then . else . + {decisions:[]} end' "$STATE" > "${STATE}.tmp.$$" && mv "${STATE}.tmp.$$" "$STATE"
+# Initialize state file if absent (new schema)
+[ -f "$STATE" ] || echo '{"spawned_agents":[],"decisions":[],"last_updated":"","current_focus":"","active_tasks":[],"findings":[],"open_questions":[],"warnings":[]}' > "$STATE"
+
+# Ensure all schema fields exist in older state files (backward-compat)
+jq 'if has("decisions") then . else . + {decisions:[]} end
+    | if has("current_focus") then . else . + {current_focus:""} end
+    | if has("active_tasks") then . else . + {active_tasks:[]} end
+    | if has("findings") then . else . + {findings:[]} end
+    | if has("open_questions") then . else . + {open_questions:[]} end
+    | if has("warnings") then . else . + {warnings:[]} end' "$STATE" > "${STATE}.tmp.$$" && mv "${STATE}.tmp.$$" "$STATE"
 
 # Read-modify-write (now safe under lock)
 jq --arg agent "$AGENT" --arg ts "$(date -Iseconds)" \

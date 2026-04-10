@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # PreToolUse hook: enforce Neal's tool allowlist in team mode.
-# Only the parent session (team lead) is restricted; subagents are unrestricted.
+# Only the parent session (team lead) is restricted; subagents are
+# unrestricted. Subagent detection is via .brains_in_a_hat/state/in-subagent.*
+# marker files written by SubagentStart and removed by SubagentStop.
 set -euo pipefail
 
 # Guard: team mode must be active
@@ -10,7 +12,17 @@ INPUT=$(cat)
 TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null) || exit 0
 TOOL=$(echo "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null) || exit 0
 
-# Subagent -> allow all tools
+# === Subagent detection ===========================================
+# Primary: SubagentStart writes .brains_in_a_hat/state/in-subagent.<id>;
+# SubagentStop removes it. If any marker exists, we are inside a subagent
+# context — allow all tools (matches the design documented in CLAUDE.md).
+if ls .brains_in_a_hat/state/in-subagent.* &>/dev/null; then
+  exit 0
+fi
+# Legacy fallback (kept harmless): old transcript_path heuristic.
+# transcript_path passed to PreToolUse refers to the PARENT session in
+# current Claude Code, so this branch never matches in practice — but
+# it is kept in case a future SDK version changes the contract.
 if echo "$TRANSCRIPT" | grep -qE '/subagents/agent-[^/]+'; then
   exit 0
 fi
@@ -38,11 +50,26 @@ case "$TOOL" in
   # System tools
   ToolSearch|Skill)
     exit 0 ;;
-  # Bash: only allow plugin infrastructure commands (gather-context, record-decision, etc.)
+  # Bash: plugin infrastructure + curated read-only commands
   Bash)
     CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null) || true
+
+    # (a) Plugin infrastructure commands (hooks and skills scripts)
     if echo "$CMD" | grep -qE '/brains-in-a-hat/(hooks|skills)/|\.claude/plugins/.+/(hooks|skills)/'; then
       exit 0
+    fi
+
+    # (b) Read-only allowlist — first reject any shell metacharacters
+    #     to prevent command chaining, redirection, substitution, pipes,
+    #     backgrounding, or process substitution. MUST run before the
+    #     prefix match so `gh project list; rm -rf ~` is blocked.
+    if echo "$CMD" | LC_ALL=C grep -qE '[;&|<>`$(){}\\]|>>|<<|--exec|-exec'; then
+      :  # has metacharacters → fall through to block
+    else
+      # (c) Anchored prefix allowlist for safe read-only binaries.
+      if echo "$CMD" | LC_ALL=C grep -qE '^[[:space:]]*(gh[[:space:]]+(project|repo|issue|pr|api|auth|search)[[:space:]]+(list|view|item-list|get|status|diff|checks|search)([[:space:]]+[-A-Za-z0-9_./=:,@#]+)*[[:space:]]*|git[[:space:]]+(log|status|diff|show|branch|remote|rev-parse|ls-files|ls-tree|describe|tag|for-each-ref|blame|shortlog|reflog[[:space:]]+show|worktree[[:space:]]+list|config[[:space:]]+--get)([[:space:]]+[-A-Za-z0-9_./=:,@#~^]+)*[[:space:]]*|ls([[:space:]]+-[lAah]+)?([[:space:]]+[-A-Za-z0-9_./]+)*[[:space:]]*|pwd[[:space:]]*|whoami[[:space:]]*|date([[:space:]]+[-+%A-Za-z0-9:_ ]+)?[[:space:]]*|cat[[:space:]]+[-A-Za-z0-9_./]+([[:space:]]+[-A-Za-z0-9_./]+)*[[:space:]]*|head([[:space:]]+-n[[:space:]]*[0-9]+)?[[:space:]]+[-A-Za-z0-9_./]+[[:space:]]*|tail([[:space:]]+-n[[:space:]]*[0-9]+)?[[:space:]]+[-A-Za-z0-9_./]+[[:space:]]*|wc([[:space:]]+-[lcw]+)?[[:space:]]+[-A-Za-z0-9_./]+[[:space:]]*|file[[:space:]]+[-A-Za-z0-9_./]+[[:space:]]*)$'; then
+        exit 0
+      fi
     fi
     ;;
   # Write/Edit: allow plan files (plan mode needs these)

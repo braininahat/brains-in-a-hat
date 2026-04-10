@@ -1,7 +1,7 @@
 ---
 description: "Activate the brains-in-a-hat team — 20 specialist agents managed by Neal. Use to opt into team mode for the current session."
 argument-hint: "(no arguments)"
-allowed-tools: ["Agent", "Read", "Grep", "Glob", "Bash", "TeamCreate", "TaskCreate", "TaskUpdate", "TaskList", "SendMessage", "ToolSearch"]
+allowed-tools: ["Agent", "Read", "Grep", "Glob", "TeamCreate", "TaskCreate", "TaskUpdate", "TaskList", "SendMessage", "ToolSearch"]
 ---
 
 # Assemble
@@ -12,11 +12,11 @@ Activate Neal and the hatbrains team for this session.
 
 1. **Read the Neal persona** from `$CLAUDE_PLUGIN_ROOT/hooks/neal-persona.md`. Adopt it fully — you ARE Neal for the rest of this session.
 
-2. **Activate team mode** and gather session context by running:
-   ```
-   mkdir -p .brains_in_a_hat/state && echo "active" > ".brains_in_a_hat/state/active.$$" && bash "$CLAUDE_PLUGIN_ROOT/hooks/gather-context"
-   ```
-   The `active.*` file enables all downstream hooks (WezTerm panes, activity logging, scribe reminders). The gather-context call outputs the full session context block (git state, backlog, memory, vault state, CODEOWNERS, pending proposals).
+2. **Activate team mode** — the activation is automatic. The `first-prompt-greeting` UserPromptSubmit hook has already:
+   - Detected `/assemble` and created `.brains_in_a_hat/state/active.$$` (the activation flag that enables all downstream hooks — WezTerm panes, activity logging, scribe reminders, Neal's allowlist).
+   - Run `gather-context` (which has `$CLAUDE_PLUGIN_ROOT` set in hook env — the skill's Bash env does not) and injected the full session context block (git state, backlog, memory, vault state, CODEOWNERS, pending proposals) as `additionalContext` on this same prompt.
+
+   Read that briefing from your conversation context. The first line `## Project: <name>` is what you'll use in step 3.
 
 3. **Detect the project name** from the context output (first line: `## Project: <name>`). Use it for team creation.
 
@@ -24,11 +24,9 @@ Activate Neal and the hatbrains team for this session.
 
 5. **Detect plan mode**: Check if a system reminder says plan mode is active.
 
-6. **WezTerm integration** (optional, `$WEZTERM_PANE` set): Per-agent activity panes are created automatically by SubagentStart hooks. Grid layout: Claude stays leftmost single row, agents stack up to 4 rows per column, new columns on overflow. Each agent gets its own pane filtered to its activity.
-
-7. **Spawn the session scribe** (Gale) in the background:
+6. **Spawn the session scribe** (Gale) in the background:
    - Agent(subagent_type="brains-in-a-hat:scribe", team_name="hatbrains-<project>", name="Gale", model="haiku", run_in_background=true)
-   - Prompt: "You are Gale on team 'hatbrains-<project>'. Open or create the session log at ~/.brains_in_a_hat/vault/<project>--session-log.md and add a new session chapter for today. Template at $CLAUDE_PLUGIN_ROOT/vault-templates/session-log.md. Also proactively create wiki entries for any concepts discussed."
+   - Prompt: "You are Gale on team 'hatbrains-<project>'. You have TWO core responsibilities: (1) maintain the vault session log at ~/.brains_in_a_hat/vault/<project>--session-log.md (open or create from $CLAUDE_PLUGIN_ROOT/vault-templates/session-log.md, add a new session chapter for today, append findings as they arrive); (2) curate shared context by writing to .brains_in_a_hat/state/session-state.json — append to .findings[] ring buffer of 20 on every significant SendMessage, refresh .active_tasks from TaskList in the same write, update .current_focus on focus updates, record .warnings and .open_questions as teammates report them. Use the directory-lock pattern (mkdir .brains_in_a_hat/state/session-state.json.lock.d). Also proactively create wiki entries for concepts discussed."
 
 8. **Greet the user** with a concise 3-5 line briefing (branch, dirty files, blockers) and confirm team activation.
 

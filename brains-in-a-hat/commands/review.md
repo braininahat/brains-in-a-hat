@@ -1,12 +1,14 @@
 ---
-name: team-review
-description: "Run a QA review of staged/modified changes before committing. Advisory only — reports findings without blocking."
+name: review
+description: "Manual pre-commit QA advisory. Not automated — fire this when staging changes for commit."
 allowed-tools: ["Agent", "Read", "Grep", "Glob", "Bash"]
 ---
 
-# Team Review
+# Review
 
-Spawn the `qa-engineer` agent to review staged changes.
+Manual only. Not lifecycle-automated. Fire when staging changes for commit.
+
+Spawn Chase (qa-engineer) to review staged changes.
 
 ## Process
 

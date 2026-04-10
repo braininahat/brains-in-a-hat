@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# SubagentStart hook: emit PROTOCOLS + precomputed per-agent suffix.
-# Suffix (RECOMMENDED SKILLS + inline fallbacks) is read from agent-ctx.cache,
-# refreshed once per session by refresh-skills-cache.
+# SubagentStart hook: emit PROTOCOLS + SHARED CONTEXT + precomputed per-agent suffix.
+# - PROTOCOLS: static team-member rules (activity logging, navigation, comms, etc.)
+# - SHARED CONTEXT: live snapshot of session-state.json (current_focus, active_tasks,
+#   recent findings, open_questions, warnings) — curated by Gale (scribe.md).
+# - SUFFIX: per-agent RECOMMENDED SKILLS + inline fallbacks, read from agent-ctx.cache.
 set -euo pipefail
 
 ls .brains_in_a_hat/state/active.* &>/dev/null || exit 0
@@ -32,9 +34,34 @@ VAULT: Persist artifacts to ~/.brains_in_a_hat/vault/ using $CLAUDE_PLUGIN_ROOT/
 WIKI: Reference-repo explorations -> ~/.brains_in_a_hat/vault/<slug>.md (template: wiki.md, type: wiki).
 PRIOR ART: Before research/design/review, check vault index from session context. Build on existing notes.
 TEAMMATES: Need help? SendMessage(to=Neal) with expertise needed. Roster: Gale(scribe) Mason(architect) Tabitha(data-schema) Porter(devops) Paige(docs-writer) Sage(domain-expert) Sterling(hardware-device) Mira(meta-retro) Nolan(mlops) Cooper(packaging) Blaze(profiler) Chase(qa-engineer) Quinn(qt-qml) Hunter(researcher) Reed(session-manager) Melody(signal-processing) Drew(system-designer) Tessa(testing-strategy) Parker(project-manager) Iris(ui-reviewer) Journey(ux-workflow).
-SCRIBE: SendMessage(to=Gale) with findings, metrics, wandb links, hypotheses, results — Gale maintains the session log.'
+SCRIBE: SendMessage(to=Gale) with findings, metrics, wandb links, hypotheses, results — Gale maintains the session log AND curates shared context.'
 
-CTX="${PROTOCOLS}${SUFFIX}"
+# Shared context summary (read-only snapshot of current team state, curated by Gale)
+SHARED=""
+STATE=".brains_in_a_hat/state/session-state.json"
+if [ -f "$STATE" ]; then
+  SHARED=$(jq -r '
+    (if (.current_focus // "") != "" then "- focus: " + .current_focus + "\n" else "" end) +
+    (if ((.active_tasks // []) | length) > 0 then
+      "- active tasks: " + ((.active_tasks[:5]) | map("[" + (.status // "?") + "] " + (.owner // "unassigned") + ": " + (.title // .id // "?")) | join("; ")) + "\n"
+    else "" end) +
+    (if ((.findings // []) | length) > 0 then
+      "- recent findings: " + ((.findings[-5:]) | map("[" + (.agent // "?") + "] " + (.note // "")) | join(" | ")) + "\n"
+    else "" end) +
+    (if ((.open_questions // []) | length) > 0 then
+      "- open questions: " + (.open_questions | join(" | ")) + "\n"
+    else "" end) +
+    (if ((.warnings // []) | length) > 0 then
+      "- warnings: " + (.warnings | join(" | ")) + "\n"
+    else "" end)
+  ' "$STATE" 2>/dev/null) || SHARED=""
+fi
+
+CTX="${PROTOCOLS}"
+if [ -n "$SHARED" ]; then
+  CTX="${CTX}"$'\n\nSHARED CONTEXT (read on spawn, curated by Gale):\n'"${SHARED}"
+fi
+CTX="${CTX}${SUFFIX}"
 
 jq -nc --arg ctx "$CTX" '{hookSpecificOutput:{hookEventName:"SubagentStart", additionalContext:$ctx}}'
 exit 0

@@ -1,34 +1,43 @@
 #!/usr/bin/env bash
 # UserPromptSubmit hook:
-# 1. Detect /assemble command and create activation flag (works in plan mode)
-# 2. When team is active, refresh skills caches (session-scoped)
-# 3. On first prompt of session, emit missing-skills banner (once per session)
-# 4. On every prompt, inject compaction recovery breadcrumb (~50 tokens)
+# 1. Detect /assemble and create activation flag (works in plan mode)
+# 2. When team is active, refresh skills caches (once per session)
+# 3. On first prompt of session, compute missing-skills banner
+# 4. On /assemble, inject the gather-context briefing as additionalContext
+# 5. On prompts AFTER a real compaction event, inject COMPACTION RECOVERY
+#    systemMessage (gated by compact-pending marker)
+# 6. On prompts AFTER PreCompact or SessionEnd, inject a RETRO DUE
+#    instruction (gated by retro-pending marker)
+# 7. On the first prompt after a session-end-snapshot.json exists, inject
+#    a POST-MORTEM DUE instruction to spawn Reed(mode=persist)
+# 8. On every prompt (team active), inject a CURRENT FOCUS line so Neal
+#    can detect topic pivots and suggest /compact
 set -euo pipefail
 
 INPUT=$(cat)
 PROMPT=$(echo "$INPUT" | jq -r '.user_prompt // empty' 2>/dev/null) || true
 
 # Detect /assemble activation — create flag before Claude processes the skill.
-# Runs as bash, bypasses plan mode restrictions.
 if echo "$PROMPT" | grep -qiE '^/assemble$|^/brains-in-a-hat:assemble$'; then
   mkdir -p .brains_in_a_hat/state
   echo "active" > ".brains_in_a_hat/state/active.$$"
 fi
 
-# When team is active, refresh caches + emit breadcrumb
+# When team is active, refresh caches and consider emitting output
 if ls .brains_in_a_hat/state/active.* &>/dev/null; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
   bash "${SCRIPT_DIR}/refresh-skills-cache" 2>/dev/null || true
 
-  # Resolve project-scoped team name (e.g., "hatbrains-brains-in-a-hat")
+  # Resolve project-scoped team name
   source "${SCRIPT_DIR}/lib-common.sh"
   PROJECT=$(detect_project_name 2>/dev/null || echo "unknown")
   TEAM_NAME="hatbrains-${PROJECT}"
 
-  # Once-per-session: missing-skills banner (marker tied to session PID)
+  # Session ID derived from latest active.* file
   ACTIVE_FILE=$(ls -t .brains_in_a_hat/state/active.* 2>/dev/null | head -1)
   SESSION_ID="${ACTIVE_FILE##*/active.}"
+
+  # Once-per-session: missing-skills banner
   MARKER=".brains_in_a_hat/state/missing-shown.${SESSION_ID}"
   BANNER=""
   if [ ! -f "$MARKER" ]; then
@@ -39,13 +48,94 @@ if ls .brains_in_a_hat/state/active.* &>/dev/null; then
     fi
   fi
 
-  # Compaction recovery breadcrumb — once per session, not every prompt
-  BREADCRUMB_MARKER=".brains_in_a_hat/state/breadcrumb-shown.${SESSION_ID}"
-  if [ ! -f "$BREADCRUMB_MARKER" ]; then
-    touch "$BREADCRUMB_MARKER"
+  # === Path A: Fresh /assemble briefing =============================
+  ADDITIONAL_CTX=""
+  GC_MARKER=".brains_in_a_hat/state/gather-context-emitted.${SESSION_ID}"
+  if echo "$PROMPT" | grep -qiE '^/assemble$|^/brains-in-a-hat:assemble$' && [ ! -f "$GC_MARKER" ]; then
+    touch "$GC_MARKER"
     PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
-    MSG=$(printf 'COMPACTION RECOVERY: You are Neal, chief of staff for team %s. If you have lost context about spawned agents or session decisions, read %s/hooks/neal-persona.md and .brains_in_a_hat/state/session-state.json to recover. Route work to specialists, never do it yourself.%s' "$TEAM_NAME" "$PLUGIN_ROOT" "$BANNER")
-    jq -nc --arg m "$MSG" '{systemMessage:$m}'
+    if [ -n "$PLUGIN_ROOT" ] && [ -x "${PLUGIN_ROOT}/hooks/gather-context" ]; then
+      ADDITIONAL_CTX=$(bash "${PLUGIN_ROOT}/hooks/gather-context" 2>/dev/null || true)
+      if [ -n "$BANNER" ]; then
+        ADDITIONAL_CTX="${ADDITIONAL_CTX}"$'\n\n'"${BANNER# }"
+        BANNER=""  # consumed
+      fi
+    fi
+  fi
+
+  # === CURRENT FOCUS (every prompt when team is active) =============
+  # Lightweight pivot-detection aid. Injects current_focus from session-state.json
+  # so Neal can compare against the new prompt without re-reading the file.
+  STATE_FILE=".brains_in_a_hat/state/session-state.json"
+  if [ -f "$STATE_FILE" ]; then
+    CURRENT_FOCUS=$(jq -r '.current_focus // ""' "$STATE_FILE" 2>/dev/null)
+    if [ -n "$CURRENT_FOCUS" ]; then
+      FOCUS_LINE="CURRENT FOCUS: ${CURRENT_FOCUS}"$'\n'"(Review against the new prompt \u2014 if it is a significant pivot, suggest /compact per persona rules.)"
+      if [ -n "$ADDITIONAL_CTX" ]; then
+        ADDITIONAL_CTX="${ADDITIONAL_CTX}"$'\n\n'"${FOCUS_LINE}"
+      else
+        ADDITIONAL_CTX="${FOCUS_LINE}"
+      fi
+    fi
+  fi
+
+  # === Path B: Post-compaction recovery banner ======================
+  SYSTEM_MSG=""
+  COMPACT_MARKER=""
+  for m in .brains_in_a_hat/state/compact-pending.*; do
+    [ -f "$m" ] || continue
+    COMPACT_MARKER="$m"
+    break
+  done
+  if [ -n "$COMPACT_MARKER" ]; then
+    rm -f "$COMPACT_MARKER"
+    PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+    SYSTEM_MSG=$(printf 'COMPACTION RECOVERY: You are Neal, chief of staff for team %s. The conversation was just compacted \u2014 your spawned-agent roster, session decisions, and WIP may have been compressed away. Recover by reading: (1) %s/hooks/neal-persona.md for your full role, (2) .brains_in_a_hat/state/session-state.json for who is spawned and what they last reported, (3) .brains_in_a_hat/state/activity.jsonl for the action timeline. Route work to specialists, never do it yourself.%s' "$TEAM_NAME" "$PLUGIN_ROOT" "$BANNER")
+  fi
+
+  # === Path C: Retro-pending handler ================================
+  RETRO_MARKER=""
+  RETRO_MODE="checkpoint"
+  for m in .brains_in_a_hat/state/retro-pending.*; do
+    [ -f "$m" ] || continue
+    RETRO_MARKER="$m"
+    RETRO_MODE=$(head -1 "$m" 2>/dev/null | tr -d '\n')
+    [ -z "$RETRO_MODE" ] && RETRO_MODE="checkpoint"
+    break
+  done
+  if [ -n "$RETRO_MARKER" ]; then
+    rm -f "$RETRO_MARKER"
+    RETRO_MSG="RETRO DUE (${RETRO_MODE}): Before your next routing decision, spawn Mira \u2014 Agent(subagent_type=brains-in-a-hat:meta-retro, name=Mira, model=sonnet, run_in_background=true) with prompt=\"mode=${RETRO_MODE}. Read .brains_in_a_hat/state/session-state.json, .brains_in_a_hat/state/activity.jsonl, and the session-log in vault. Write a ${RETRO_MODE} retrospective. Report a one-line receipt.\" Fire-and-forget in background."
+    if [ -n "$SYSTEM_MSG" ]; then
+      SYSTEM_MSG="${SYSTEM_MSG}"$'\n\n'"${RETRO_MSG}"
+    else
+      SYSTEM_MSG="${RETRO_MSG}"
+    fi
+  fi
+
+  # === Path D: Post-mortem snapshot handler =========================
+  SNAPSHOT=".brains_in_a_hat/state/session-end-snapshot.json"
+  if [ -f "$SNAPSHOT" ]; then
+    SNAPSHOT_MARKER=".brains_in_a_hat/state/post-mortem-emitted.${SESSION_ID}"
+    if [ ! -f "$SNAPSHOT_MARKER" ]; then
+      touch "$SNAPSHOT_MARKER"
+      PM_MSG="POST-MORTEM DUE: The previous session ended with unpersisted state at ${SNAPSHOT}. On your first routing opportunity, spawn Reed \u2014 Agent(subagent_type=brains-in-a-hat:session-manager, name=Reed, model=sonnet, run_in_background=true) with prompt=\"mode=persist. Read ${SNAPSHOT} and process decisions/preferences from that state. Delete the snapshot when done. Report a one-line receipt.\" Run in background. Do not wait."
+      if [ -n "$SYSTEM_MSG" ]; then
+        SYSTEM_MSG="${SYSTEM_MSG}"$'\n\n'"${PM_MSG}"
+      else
+        SYSTEM_MSG="${PM_MSG}"
+      fi
+    fi
+  fi
+
+  # === Emit combined output =========================================
+  if [ -n "$SYSTEM_MSG" ] || [ -n "$ADDITIONAL_CTX" ]; then
+    jq -nc \
+      --arg m "$SYSTEM_MSG" \
+      --arg c "$ADDITIONAL_CTX" \
+      '{}
+       + (if ($m|length) > 0 then {systemMessage:$m} else {} end)
+       + (if ($c|length) > 0 then {hookSpecificOutput:{hookEventName:"UserPromptSubmit",additionalContext:$c}} else {} end)'
   fi
 fi
 
