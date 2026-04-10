@@ -3,9 +3,12 @@
 # session-start — SessionStart hook for the brains-in-a-hat plugin
 #
 # Purpose:
-#   Bootstrap-only. Creates directory structure, starts dashboard,
-#   migrates old state. Does NOT inject persona or gather context —
-#   that's handled by /assemble when the user opts in.
+#   Bootstrap-only. Creates directory structure, migrates old state,
+#   cleans stale markers, and — if Claude Code is starting from a
+#   compaction event — writes the compact-pending marker so
+#   first-prompt-greeting will emit the recovery banner on the next
+#   user prompt. Does NOT inject persona or gather context — that's
+#   handled by /assemble when the user opts in.
 #
 # Outputs: empty (no persona injection)
 
@@ -21,32 +24,6 @@ PROJECT_CONFIG=".brains_in_a_hat"
 
 source "${SCRIPT_DIR}/lib-common.sh"
 
-# ── Dashboard auto-start ─────────────────────────────────────────────
-
-dashboard_start() {
-  mkdir -p "${STATE_DIR}"
-  if ! pgrep -f 'dashboard/server.py' > /dev/null 2>&1; then
-    local py_cmd=""
-    if command -v uv &>/dev/null; then
-      py_cmd="uv run python"
-    elif command -v python3 &>/dev/null; then
-      py_cmd="python3"
-    else
-      return 0
-    fi
-    nohup ${py_cmd} "${PLUGIN_ROOT}/dashboard/server.py" \
-      --project-dir "$(pwd)" > "${STATE_DIR}/dashboard.log" 2>&1 &
-    local url="" attempts=0
-    while [ -z "$url" ] && [ "$attempts" -lt 5 ]; do
-      sleep 0.5
-      url=$(grep -oP 'http://[^ ]+' "${STATE_DIR}/dashboard.log" 2>/dev/null | head -1)
-      attempts=$((attempts + 1))
-    done
-    # Dashboard URL is logged but NOT auto-opened (can freeze the system)
-    # Access manually at the URL in .brains_in_a_hat/state/dashboard.log
-  fi
-}
-
 # ── Directory bootstrap ──────────────────────────────────────────────
 
 bootstrap_dirs() {
@@ -57,14 +34,6 @@ bootstrap_dirs() {
   # Project-local plugin dirs
   mkdir -p "${PROJECT_CONFIG}"
   mkdir -p "${STATE_DIR}"
-
-  # Dashboard note for Obsidian Dataview (at vault root, project-prefixed)
-  local project_name
-  project_name=$(detect_project_name)
-  local dashboard_note="${VAULT_DIR}/${project_name}--dashboard.md"
-  if [ ! -f "${dashboard_note}" ]; then
-    sed "s/{{project}}/${project_name}/g" "${PLUGIN_ROOT}/vault-templates/dashboard.md" > "${dashboard_note}" 2>/dev/null || true
-  fi
 
   # CODEOWNERS (project-local, committable)
   if [ ! -f "${PROJECT_CONFIG}/CODEOWNERS" ]; then
@@ -135,7 +104,11 @@ migrate_old_state() {
 # ── Main ─────────────────────────────────────────────────────────────
 
 main() {
-  cat > /dev/null  # consume stdin
+  # Read hook input for source / session_id (used for compaction detection)
+  local INPUT SOURCE SID
+  INPUT=$(cat)
+  SOURCE=$(echo "$INPUT" | jq -r '.source // empty' 2>/dev/null) || SOURCE=""
+  SID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SID=""
 
   # Bootstrap directories
   bootstrap_dirs
@@ -149,44 +122,57 @@ main() {
     local pid="${pidfile##*.}"
     kill -0 "$pid" 2>/dev/null || rm -f "$pidfile"
   done
-  # Clean up stale breadcrumb + missing-skills markers (match active.* cleanup)
-  for marker in "${STATE_DIR}"/breadcrumb-shown.*; do
-    [ -f "$marker" ] || continue
-    local pid="${marker##*/breadcrumb-shown.}"
-    kill -0 "$pid" 2>/dev/null || rm -f "$marker"
-  done
+  # Clean up stale missing-skills markers (PID-keyed)
   for marker in "${STATE_DIR}"/missing-shown.*; do
     [ -f "$marker" ] || continue
     local pid="${marker##*/missing-shown.}"
     kill -0 "$pid" 2>/dev/null || rm -f "$marker"
   done
-  # Clean up stale skills-cache-built markers
+  # Clean up stale skills-cache-built markers (PID-keyed)
   for marker in "${STATE_DIR}"/skills-cache-built.*; do
     [ -f "$marker" ] || continue
     local pid="${marker##*/skills-cache-built.}"
     kill -0 "$pid" 2>/dev/null || rm -f "$marker"
   done
-  # Clean up stale wezterm/terminal pane state files
-  rm -f "${STATE_DIR}"/wezterm-feed-*.id "${STATE_DIR}"/wezterm-pane-*.id "${STATE_DIR}"/wezterm-cols-*.json "${STATE_DIR}"/wezterm-grid.json "${STATE_DIR}"/tmux-shim.log 2>/dev/null || true
+  # Clean up stale gather-context-emitted markers (PID-keyed)
+  for marker in "${STATE_DIR}"/gather-context-emitted.*; do
+    [ -f "$marker" ] || continue
+    local pid="${marker##*/gather-context-emitted.}"
+    kill -0 "$pid" 2>/dev/null || rm -f "$marker"
+  done
+  # Clean up stale compact-pending markers (keyed by session_id, not PID).
+  # Any marker not matching the current session_id is stale — drop it.
+  for marker in "${STATE_DIR}"/compact-pending.*; do
+    [ -f "$marker" ] || continue
+    [ "${marker##*/compact-pending.}" = "$SID" ] || rm -f "$marker"
+  done
+  # Clean up stale in-subagent markers (no PID linkage; safe to wipe at boot
+  # because no subagent can be running at session start)
+  rm -f "${STATE_DIR}"/in-subagent.* 2>/dev/null || true
+  # Clean up stale post-mortem-emitted markers (PID-keyed)
+  for marker in "${STATE_DIR}"/post-mortem-emitted.*; do
+    [ -f "$marker" ] || continue
+    local pid="${marker##*/post-mortem-emitted.}"
+    kill -0 "$pid" 2>/dev/null || rm -f "$marker"
+  done
+  # Clean up orphaned dashboard.log from older plugin versions (harmless if absent)
+  rm -f "${STATE_DIR}/dashboard.log" 2>/dev/null || true
   # Clean up stale session-state lock (shouldn't persist — safety net)
   rmdir "${STATE_DIR}/session-state.json.lock.d" 2>/dev/null || true
+  # Clean up stale retro lock (safety net — if Mira crashed mid-retro)
+  rmdir "${STATE_DIR}/retro.lock.d" 2>/dev/null || true
   # Only clear session state if no other session is active
   if ! ls "${STATE_DIR}"/active.* &>/dev/null; then
     rm -f "${STATE_DIR}/session-state.json"
   fi
 
-  # Start dashboard (non-blocking)
-  dashboard_start
-
-  # Register project for dashboard multi-project discovery
-  local project_name
-  project_name=$(detect_project_name)
-  local GLOBAL_SESSIONS="${HOME}/.brains_in_a_hat/active-sessions.jsonl"
-  jq -nc \
-    --arg ts "$(date -Iseconds)" \
-    --arg project "$(pwd)" \
-    --arg name "${project_name}" \
-    '{ts:$ts, project:$project, name:$name}' >> "${GLOBAL_SESSIONS}"
+  # Belt + suspenders: if Claude Code is starting from a compaction event,
+  # write the compact-pending marker so first-prompt-greeting will emit the
+  # COMPACTION RECOVERY banner once on the next user prompt. Covers cases
+  # where the PreCompact hook may not have fired (e.g., auto-compact paths).
+  if [ "$SOURCE" = "compact" ] && [ -n "$SID" ]; then
+    touch ".brains_in_a_hat/state/compact-pending.${SID}"
+  fi
 
   # No output — no persona injection.
   # User activates team mode with /assemble.

@@ -165,12 +165,64 @@ status: active
 
 You do NOT need to be told to create wiki entries. When you log findings to the session log that involve noteworthy concepts, create the wiki entry in the same operation. Link the session log entry to the wiki note with `[[wikilinks]]`.
 
+## Shared Context Curator
+
+You are the active writer of the shared-context fields in `.brains_in_a_hat/state/session-state.json`. Whenever you receive a SendMessage from any teammate (or Neal) with a finding, decision, warning, or focus update, curate it into the shared state file under the directory-lock pattern.
+
+### 1. Append to `findings[]` (ring buffer of 20)
+
+```bash
+LOCK=".brains_in_a_hat/state/session-state.json.lock.d"
+STATE=".brains_in_a_hat/state/session-state.json"
+for _ in 1 2 3 4 5; do mkdir "$LOCK" 2>/dev/null && break; sleep 0.1; done
+trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+
+jq --arg ts "$(date -Iseconds)" \
+   --arg agent "$SENDER" \
+   --arg note "$NOTE" \
+   --arg topic "$TOPIC" \
+   '.findings = ((.findings + [{ts:$ts, agent:$agent, note:$note, topic:$topic}])[-20:])
+    | .last_updated = $ts' \
+   "$STATE" > "${STATE}.tmp.$$" && mv "${STATE}.tmp.$$" "$STATE"
+```
+
+### 2. Refresh `active_tasks[]` on every curator write
+
+In the same lock window, query TaskList (via the TaskList tool), project to a compact structure `{id, title, owner, status}`, and overwrite `active_tasks`:
+
+```bash
+# pseudocode: TaskList results → projected to TASKS_JSON (array of {id,title,owner,status})
+jq --argjson tasks "$TASKS_JSON" \
+   '.active_tasks = $tasks | .last_updated = (now | todateiso8601)' \
+   "$STATE" > "${STATE}.tmp.$$" && mv "${STATE}.tmp.$$" "$STATE"
+```
+
+Because you write `findings` on every significant SendMessage, `active_tasks` gets refreshed at the same cadence — no separate polling needed.
+
+### 3. Maintain `current_focus`
+
+When Neal SendMessages you with a "focus update" (e.g., `focus: fix the OAuth bug`), write it to `.current_focus` under the same lock. Neal also updates this via his pivot-detection rule when the user starts a new topic.
+
+### 4. Warnings and open questions
+
+Any teammate can SendMessage you with:
+- `warning: <text>` — append to `.warnings[]` (cap at 10 entries, drop oldest)
+- `question: <text>` — append to `.open_questions[]` (cap at 10)
+
+### 5. Do NOT curator-write for trivial events
+
+Only curator-write for: findings with real signal, decisions, warnings, open questions, explicit focus updates. Do NOT write on every "agent started/completed" event — those already go to activity.jsonl via hooks.
+
+### Why this matters
+
+`inject-subagent-context` reads `session-state.json` on every SubagentStart and injects a `SHARED CONTEXT` block into each new team member's spawn context. Without your curation, that block is empty and new agents have no awareness of what the rest of the team is doing. Your curation is what makes cross-agent visibility work.
+
 ## On Session End
 
 When instructed to finalize:
 1. Remove any empty section stubs from the current chapter
 2. Ensure any wiki entries created this session are consistent
-3. Report the chapter summary to Neal via SendMessage (include count of wiki entries created/updated)
+3. Report the chapter summary to Neal via SendMessage (include count of wiki entries created/updated + count of curator writes: findings appended, warnings recorded, questions tracked)
 
 ## Conventions
 

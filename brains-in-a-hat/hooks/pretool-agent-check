@@ -69,7 +69,10 @@ vault_check() {
   if [ -n "$matched_files" ]; then
     local file_list
     file_list=$(echo "$matched_files" | head -5 | tr '\n' ', ' | sed 's/, $//')
-    printf '{"decision":"block","reason":"Prior research found in vault. Read these first, then retry or skip spawn if the answer is there: %s"}' "$file_list"
+    # Advisory only — no longer blocks. Emit a hint as additionalContext so
+    # the spawned agent can choose to read the cited files. Add [vault-reviewed]
+    # to prompts to suppress this hint in future spawns.
+    printf '{"hookSpecificOutput":{"additionalContext":"VAULT HINT: Prior research found in the vault at %s. Read these before or during work if relevant. Add [vault-reviewed] to the prompt to suppress this hint in future spawns."}}' "$file_list"
     exit 0
   fi
 }
