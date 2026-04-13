@@ -9,12 +9,16 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-VAULT_DIR="${HOME}/.brains_in_a_hat/vault"
-STATE_DIR=".brains_in_a_hat/state"
 
 # ── Shared helpers ────────────────────────────────────────────────────
 
 source "${SCRIPT_DIR}/lib-common.sh"
+
+# Accept KEY as argv[1]; fall back to detect_project_key from cwd.
+KEY="${1:-}"
+[ -n "$KEY" ] || KEY=$(detect_project_key)
+SDIR=$(state_dir "$KEY")
+STATE_DIR="$SDIR"   # legacy alias used below
 
 # ── PM tier detection ─────────────────────────────────────────────────
 
@@ -250,15 +254,19 @@ build_context() {
   project_name=$(detect_project_name)
   pm_tier=$(detect_pm_tier)
 
-  # Cache PM tier (atomic write)
+  # Cache PM tier (atomic write) and team name (used by /assemble)
   mkdir -p "${STATE_DIR}"
   printf '%s' "${pm_tier}" > "${STATE_DIR}/pm-tier.tmp.$$" && \
     mv "${STATE_DIR}/pm-tier.tmp.$$" "${STATE_DIR}/pm-tier"
+  team_name_for_key "${KEY}" > "${STATE_DIR}/team-name"
 
   local context=""
   context+="## Project: ${project_name}\n"
+  context+="Key: ${KEY}\n"
+  context+="State: ${STATE_DIR}\n"
+  context+="Team: $(cat "${STATE_DIR}/team-name")\n"
   context+="PM tier: ${pm_tier}\n"
-  context+="Vault: ~/.brains_in_a_hat/vault/ (project: ${project_name})\n\n"
+  context+="Vault: ${VAULT_DIR}/ — files at root with prefix \`${KEY}--\`. Per-project index: \`${KEY}--index.md\`.\n\n"
 
   context+="## Git State\n$(gather_git_data)\n\n"
   context+="## Backlog (${pm_tier})\n$(gather_issues "${pm_tier}")\n\n"

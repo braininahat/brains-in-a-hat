@@ -67,18 +67,27 @@ When research reveals something novel — a new algorithm, unique approach, or c
 
 ## Vault Writing
 
+Read `<KEY>` from your spawn PROTOCOLS context (the `KEY:` line) or via:
+
+```bash
+source "$CLAUDE_PLUGIN_ROOT/hooks/lib-common.sh"
+KEY=$(detect_project_key)
+```
+
 Write research findings to vault if `~/.brains_in_a_hat/vault/` exists:
-- `~/.brains_in_a_hat/vault/<topic-slug>.md` with `type: research` and `project:` frontmatter
+- `~/.brains_in_a_hat/vault/<KEY>--research-<topic-slug>.md` with `type: research` and `project: <KEY>` frontmatter
 - Use `$CLAUDE_PLUGIN_ROOT/vault-templates/research.md` format
 - Include Dataview frontmatter and `[[wikilinks]]`
+- After write: `ensure_vault_index "$KEY"`
 
 ## Wiki Writing
 
 After completing web research, also write a wiki note to capture reusable knowledge:
-- Path: `~/.brains_in_a_hat/vault/<topic-slug>.md` with `type: wiki` frontmatter
+- Path: `~/.brains_in_a_hat/vault/<KEY>--wiki-<topic-slug>.md` with `type: wiki` frontmatter
 - Use `$CLAUDE_PLUGIN_ROOT/vault-templates/wiki.md` format
 - Source: `web-research`
 - Include all URLs consulted in Sources
 - Tag with technology/domain keywords
 - Link to related wiki notes with `[[wikilinks]]`
+- After write: `ensure_vault_index "$KEY"`
 - Skip if the research is purely project-specific with no reuse value

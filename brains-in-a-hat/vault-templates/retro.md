@@ -1,12 +1,20 @@
 ---
 type: retro
 write-path: "~/.brains_in_a_hat/vault/"
-project: "{{project}}"
+project: "{{key}}"
 agents: []
 date: "{{date}}"
 tags: [retro]
 status: active
 ---
+
+<!--
+Filename convention: <KEY>--retro-<date>.md (final) or <KEY>--retro-checkpoint-<iso>.md (checkpoint).
+After writing:
+  source "$CLAUDE_PLUGIN_ROOT/hooks/lib-common.sh"
+  ensure_vault_index "$KEY"
+-->
+
 # Retrospective: {{date}}
 
 ## What Happened

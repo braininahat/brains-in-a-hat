@@ -18,7 +18,21 @@ Claude Code lifecycle hooks for the brains-in-a-hat plugin.
 | `enforce-neal-allowlist` | PreToolUse catch-all — enforces Neal's tool allowlist (Read, Grep, Glob, LS, Agent, SendMessage, Task*, Team*, AskUserQuestion, mode tools, Skill, ToolSearch, plugin-infra Bash, curated read-only Bash — `gh list/view/api/search`, `git log/status/diff/show/blame/config --get`, `ls`, `cat`, `head`, `tail`, `wc`, `file`, `pwd`, `whoami`, `date` — with shell metacharacters rejected). Subagents bypass the allowlist via `.brains_in_a_hat/state/in-subagent.*` marker files written by `SubagentStart` and removed by `SubagentStop` |
 | `pretool-agent-check` | PreToolUse[Agent] script — enforces sonnet ceiling (blocks opus for team members), advises model tier based on task keywords, runs vault-check which emits an **advisory** `VAULT HINT` as `hookSpecificOutput.additionalContext` (not a hard block) when prior research matches, with `[vault-reviewed]` bypass |
 | `record-decision` | Helper called by Reed (session-manager) via Bash allowlist — persists decisions to `session-state.json.decisions` under a directory lock |
-| `lib-common.sh` | Shared helpers (currently `detect_project_name` — resolves project name via gh or pwd basename) |
+| `lib-common.sh` | Shared helpers: `detect_project_key` (sanitized abs project root, matches Claude Code's `~/.claude/projects/<KEY>/` scheme), `read_session_key` (SID→key lookup), `state_dir`, `vault_file_for`, `team_name_for_key`, `ensure_vault_index` (refreshes the per-project Obsidian index note under a directory lock), `detect_project_name` (legacy human display) |
+| `inline-*` | 11 wrapper scripts extracted from `hooks.json` inline commands. Each sources `lib-common.sh`, reads stdin SID, resolves the per-key state dir via `read_session_key`, and exits 0 if no key found. Files: `inline-session-end`, `inline-precompact`, `inline-subagent-{start,stop}-{activity,marker}`, `inline-posttool-{agent-activity,agent-scribe,enter-plan,exit-plan}`, `inline-pretool-write-plugin-guard` |
+
+## Session → Key Resolution
+
+Every non-SessionStart hook follows this pattern:
+
+1. Read stdin JSON, extract `.session_id` as `SID`.
+2. `read_session_key "$SID"` → returns the key string from `~/.brains_in_a_hat/sessions/<SID>.key`. If empty, exit 0 (session not bootstrapped or non-team session).
+3. `state_dir "$KEY"` → `~/.brains_in_a_hat/state/<KEY>/`.
+4. All reads/writes scoped to that directory.
+
+`session-start` is the one exception: it's guaranteed by Claude Code to run with `cwd` set to the project root, so it derives the key via `detect_project_key` (realpath + git-toplevel → sanitized) and WRITES the `sessions/<SID>.key` mapping for everyone else. It also caches `team_name_for_key "$KEY"` to `${SDIR}/team-name` for `/assemble`.
+
+`record-decision` is also an exception: Reed (session-manager) calls it via direct bash, not as a hook, so it doesn't receive `.session_id`. It falls back to `detect_project_key` from cwd. This is safe because Reed runs in the parent session's cwd.
 
 ## Hook Execution Order
 
@@ -27,25 +41,33 @@ Session opens
     │
     ▼
 SessionStart ──► session-start (via run-hook.cmd)
-                   ├─ Starts dashboard server (non-blocking)
-                   ├─ First-run: creates vault dirs, CODEOWNERS, Obsidian config
-                   ├─ Cleans stale state: active.*, missing-shown.*,
+                   ├─ Computes KEY = detect_project_key (sanitized abs cwd)
+                   ├─ Writes ~/.brains_in_a_hat/sessions/<SID>.key (the linchpin
+                   │  every other hook uses to resolve its per-key state dir)
+                   ├─ Bootstraps ~/.brains_in_a_hat/state/<KEY>/ + vault dirs
+                   ├─ Caches team name to <SDIR>/team-name
+                   ├─ First-run: creates in-tree CODEOWNERS, Obsidian config
+                   ├─ Cleans stale per-key markers: active.*, missing-shown.*,
                    │                     skills-cache-built.*,
                    │                     gather-context-emitted.*,
                    │                     post-mortem-emitted.*,
-                   │                     compact-pending.* (mismatched),
+                   │                     compact-pending.* (mismatched SID),
                    │                     in-subagent.* (all),
                    │                     retro.lock.d, session-state.json.lock.d
-                   ├─ If source==compact, writes compact-pending.<sid>
+                   ├─ If source==compact, writes compact-pending.<SID>
                    │  so first-prompt-greeting will emit the recovery banner
                    ├─ Appends session record to ~/.brains_in_a_hat/active-sessions.jsonl
+                   │  (now includes `key` and `session_id` fields)
+                   ├─ Detects legacy in-tree .brains_in_a_hat/state/ and emits
+                   │  a deprecation notice pointing at bin/migrate-state-layout.sh
                    └─ No persona injection (bootstrap only)
 
 User sends message (any prompt)
     │
     ▼
 UserPromptSubmit ──► first-prompt-greeting
-                       ├─ Detects /assemble — creates .brains_in_a_hat/state/active.<PID>
+                       ├─ Reads SID from stdin, resolves KEY via read_session_key
+                       ├─ Detects /assemble — creates ${SDIR}/active.<SID>
                        ├─ When team active: refreshes skills caches (once per session)
                        ├─ First prompt of session: emits missing-skills banner
                        │                          (if any expected skills missing)
@@ -209,4 +231,4 @@ If no tasks are assigned to you, idle silently. Do NOT message Neal to announce 
 Read `.brains_in_a_hat/domain-config.json` if it exists for project-specific terminology, compliance rules, and patterns.
 
 **Vault Persistence**
-If `~/.brains_in_a_hat/vault/` exists, persist durable artifacts (findings, decisions, reviews, designs) using templates from `$CLAUDE_PLUGIN_ROOT/vault-templates/`. Use Dataview frontmatter (`type`, `project`, `agents`, `date`, `tags`, `status`) and `[[wikilinks]]`. Write to `~/.brains_in_a_hat/vault/` root — all notes flat, categorized by `type:` and `project:` properties. Images go in `attachments/`. Read the relevant template before writing.
+If `~/.brains_in_a_hat/vault/` exists, persist durable artifacts using templates from `$CLAUDE_PLUGIN_ROOT/vault-templates/`. Filename convention is `<KEY>--<category>[-<slug>].md` at vault root. Use Dataview frontmatter (`type`, `project: <KEY>`, `agents`, `date`, `tags`, `status`) and `[[wikilinks]]`. Images go in `attachments/`. After every vault write, call `ensure_vault_index "$KEY"` (from `lib-common.sh`) to refresh the per-project index note `<KEY>--index.md` — it's the user's navigable table of contents via Obsidian wikilinks.

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# SubagentStart inline: append "start" event to activity.jsonl.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+source "${SCRIPT_DIR}/lib-common.sh"
+
+LOGFILE="${BIH_HOME}/state/_bootstrap.log"
+mkdir -p "$(dirname "$LOGFILE")" 2>/dev/null || true
+exec 2>> "$LOGFILE"
+
+INPUT=$(cat)
+SID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SID=""
+[ -n "$SID" ] || exit 0
+KEY=$(read_session_key "$SID")
+[ -n "$KEY" ] || exit 0
+SDIR=$(state_dir "$KEY")
+exec 2>> "${SDIR}/hook-debug.log"
+
+ls "${SDIR}"/active.* &>/dev/null || exit 0
+
+AGENT=$(echo "$INPUT" | jq -r '.agent_type // "agent"')
+jq -nc --arg ts "$(date -Iseconds)" --arg agent "$AGENT" --arg session "$SID" \
+  '{ts:$ts,agent:$agent,session:$session,event:"start",detail:"spawned"}' \
+  >> "${SDIR}/activity.jsonl" 2>/dev/null || true

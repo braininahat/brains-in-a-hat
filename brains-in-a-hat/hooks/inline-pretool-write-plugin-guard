@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# PreToolUse[Write] inline: block agents from modifying plugin files.
+# Does not need state — pure path check. Extracted for stderr-redirect consistency.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+source "${SCRIPT_DIR}/lib-common.sh"
+
+LOGFILE="${BIH_HOME}/state/_bootstrap.log"
+mkdir -p "$(dirname "$LOGFILE")" 2>/dev/null || true
+exec 2>> "$LOGFILE"
+
+INPUT=$(cat)
+SID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SID=""
+KEY=$(read_session_key "$SID")
+if [ -n "$KEY" ]; then
+  SDIR=$(state_dir "$KEY")
+  exec 2>> "${SDIR}/hook-debug.log"
+fi
+
+FILE=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-__unset__}"
+if [ "$PLUGIN_ROOT" != "__unset__" ] && echo "$FILE" | grep -qF "$PLUGIN_ROOT"; then
+  echo '{"decision":"block","reason":"Cannot modify plugin files from within an agent."}'
+fi

@@ -1,22 +1,36 @@
 #!/usr/bin/env bash
 # PreToolUse hook: enforce Neal's tool allowlist in team mode.
 # Only the parent session (team lead) is restricted; subagents are
-# unrestricted. Subagent detection is via .brains_in_a_hat/state/in-subagent.*
+# unrestricted. Subagent detection is via per-key in-subagent.<id>
 # marker files written by SubagentStart and removed by SubagentStop.
 set -euo pipefail
 
-# Guard: team mode must be active
-ls .brains_in_a_hat/state/active.* &>/dev/null || exit 0
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+source "${SCRIPT_DIR}/lib-common.sh"
+
+LOGFILE="${BIH_HOME}/state/_bootstrap.log"
+mkdir -p "$(dirname "$LOGFILE")" 2>/dev/null || true
+exec 2>> "$LOGFILE"
 
 INPUT=$(cat)
+SID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SID=""
+[ -n "$SID" ] || exit 0
+KEY=$(read_session_key "$SID")
+[ -n "$KEY" ] || exit 0
+SDIR=$(state_dir "$KEY")
+exec 2>> "${SDIR}/hook-debug.log"
+
+# Guard: team mode must be active for THIS session's key
+ls "${SDIR}"/active.* &>/dev/null || exit 0
+
 TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null) || exit 0
 TOOL=$(echo "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null) || exit 0
 
 # === Subagent detection ===========================================
-# Primary: SubagentStart writes .brains_in_a_hat/state/in-subagent.<id>;
-# SubagentStop removes it. If any marker exists, we are inside a subagent
-# context — allow all tools (matches the design documented in CLAUDE.md).
-if ls .brains_in_a_hat/state/in-subagent.* &>/dev/null; then
+# Primary: SubagentStart writes ${SDIR}/in-subagent.<id>;
+# SubagentStop removes it. If any marker exists in this session's key
+# dir, we are inside a subagent context — allow all tools.
+if ls "${SDIR}"/in-subagent.* &>/dev/null; then
   exit 0
 fi
 # Legacy fallback (kept harmless): old transcript_path heuristic.
