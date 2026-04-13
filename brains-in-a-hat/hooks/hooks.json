@@ -103,7 +103,7 @@
           },
           {
             "type": "command",
-            "command": "{ if ls .brains_in_a_hat/state/active.* &>/dev/null; then INPUT=$(cat); AGENT=$(echo \"$INPUT\" | jq -r '.tool_input.name // .tool_input.subagent_type // \"agent\"' 2>/dev/null); case \"$AGENT\" in Gale|brains-in-a-hat:scribe) exit 0 ;; esac; printf '{\"hookSpecificOutput\":{\"additionalContext\":\"SCRIBE: Agent %s just completed. SendMessage Gale with a summary of findings, decisions, metrics, or concepts worth logging. Gale will update the session log, create wiki entries, and curate shared context in session-state.json.\"}}' \"$AGENT\"; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "{ if ls .brains_in_a_hat/state/active.* &>/dev/null; then INPUT=$(cat); AGENT=$(echo \"$INPUT\" | jq -r '.tool_input.name // .tool_input.subagent_type // \"agent\"' 2>/dev/null); case \"$AGENT\" in Gale|brains-in-a-hat:scribe) exit 0 ;; esac; jq -nc --arg a \"$AGENT\" '{hookSpecificOutput:{hookEventName:\"PostToolUse\",additionalContext:(\"SCRIBE: Agent \" + $a + \" just completed. SendMessage Gale with a summary of findings, decisions, metrics, or concepts worth logging. Gale will update the session log, create wiki entries, and curate shared context in session-state.json.\")}}'; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       },
@@ -112,7 +112,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{ if ls .brains_in_a_hat/state/active.* &>/dev/null; then printf '{\"hookSpecificOutput\":{\"additionalContext\":\"SCRIBE: Entered plan mode. SendMessage Gale with the planning context \\u2014 what problem is being solved, constraints, and research questions. Gale will log under Research Questions / Methods.\"}}'; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "{ if ls .brains_in_a_hat/state/active.* &>/dev/null; then printf '{\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\",\"additionalContext\":\"SCRIBE: Entered plan mode. SendMessage Gale with the planning context \\u2014 what problem is being solved, constraints, and research questions. Gale will log under Research Questions / Methods.\"}}'; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       },
@@ -121,7 +121,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{ if ls .brains_in_a_hat/state/active.* &>/dev/null; then printf '{\"hookSpecificOutput\":{\"additionalContext\":\"SCRIBE: Exited plan mode. SendMessage Gale with the finalized plan, key decisions, and architecture choices. Gale will log under Decisions & Notes / Architecture.\"}}'; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "{ if ls .brains_in_a_hat/state/active.* &>/dev/null; then printf '{\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\",\"additionalContext\":\"SCRIBE: Exited plan mode. SendMessage Gale with the finalized plan, key decisions, and architecture choices. Gale will log under Decisions & Notes / Architecture.\"}}'; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       }

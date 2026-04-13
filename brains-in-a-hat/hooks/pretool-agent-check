@@ -72,7 +72,8 @@ vault_check() {
     # Advisory only — no longer blocks. Emit a hint as additionalContext so
     # the spawned agent can choose to read the cited files. Add [vault-reviewed]
     # to prompts to suppress this hint in future spawns.
-    printf '{"hookSpecificOutput":{"additionalContext":"VAULT HINT: Prior research found in the vault at %s. Read these before or during work if relevant. Add [vault-reviewed] to the prompt to suppress this hint in future spawns."}}' "$file_list"
+    local hint="VAULT HINT: Prior research found in the vault at ${file_list}. Read these before or during work if relevant. Add [vault-reviewed] to the prompt to suppress this hint in future spawns."
+    jq -nc --arg h "$hint" '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$h}}'
     exit 0
   fi
 }
@@ -130,8 +131,8 @@ model_check() {
   # Only advise if model is more expensive than suggested
   if [ "$model_cost" -gt "$suggested_cost" ] && [ "$suggested_cost" -gt 0 ]; then
     local actual="${MODEL:-opus(default)}"
-    printf '{"hookSpecificOutput":{"additionalContext":"MODEL HINT: This task looks %s-tier (keywords: %s). Consider model=\\\"%s\\\" instead of %s to save tokens."}}' \
-      "$suggested" "$matched_kws" "$suggested" "$actual"
+    local hint="MODEL HINT: This task looks ${suggested}-tier (keywords: ${matched_kws}). Consider model=\"${suggested}\" instead of ${actual} to save tokens."
+    jq -nc --arg h "$hint" '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$h}}'
     exit 0
   fi
 }
@@ -149,7 +150,7 @@ sonnet_ceiling() {
   case "${MODEL:-}" in
     opus*)
       echo "$PROMPT" | grep -qF '[opus-justified]' && return 0
-      printf '{"decision":"block","reason":"Opus ceiling: team members run haiku (default) or sonnet. Add [opus-justified] to the spawn prompt to escalate to opus for factually demanding tasks."}'
+      jq -nc --arg r "Opus ceiling: team members run haiku (default) or sonnet. Add [opus-justified] to the spawn prompt to escalate to opus for factually demanding tasks." '{decision:"block",reason:$r}'
       exit 0
       ;;
   esac
@@ -202,7 +203,8 @@ explore_vault_hint() {
   if [ -n "$matched_files" ]; then
     local file_list
     file_list=$(echo "$matched_files" | head -5 | tr '\n' ', ' | sed 's/, $//')
-    printf '{"hookSpecificOutput":{"additionalContext":"VAULT HINT: Before exploring locally, check these vault notes which may already cover this topic: %s. Add [vault-reviewed] to the prompt to suppress this hint."}}' "$file_list"
+    local hint="VAULT HINT: Before exploring locally, check these vault notes which may already cover this topic: ${file_list}. Add [vault-reviewed] to the prompt to suppress this hint."
+    jq -nc --arg h "$hint" '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$h}}'
     exit 0
   fi
 }
