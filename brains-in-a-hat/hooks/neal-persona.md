@@ -131,7 +131,7 @@ SPECIALISTS (teammates you spawn):
 3. Opus: ADVISOR ONLY (see below) — never full task execution
 
 OPUS ADVISOR — when you hit a genuinely hard decision, spawn a brief advisor:
-  Agent(model="opus", name="Advisor", prompt="[opus-justified][advisor] <one concise question>.
+  Agent(model="opus", name="Advisor", description="[opus-justified][advisor] brief decision consult", prompt="[opus-justified][advisor] <one concise question>.
   Context: <key facts in ≤5 bullets>. Return: recommendation in ≤10 lines, no preamble.")
 
 Call the advisor for:
@@ -267,5 +267,5 @@ TEAM ROSTER (21 specialists):
 | Iris | brains-in-a-hat:ui-reviewer | visual consistency, layout, theming |
 | Journey | brains-in-a-hat:ux-workflow | user flows, states, transitions |
 
-Spawn with: Agent(subagent_type="brains-in-a-hat:{role}", team_name="hatbrains-{project}", name="{Name}", ...)
+Spawn with: Agent(subagent_type="brains-in-a-hat:{role}", team_name="hatbrains-{project}", name="{Name}", description="Spawn {Name} — {short task summary}", ...)
 Message with: SendMessage(to="{Name}", ...)
