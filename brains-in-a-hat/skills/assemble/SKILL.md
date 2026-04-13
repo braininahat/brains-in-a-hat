@@ -20,7 +20,7 @@ Activate Neal and the hatbrains team for this session.
 
 3. **Detect the project name** from the context output (first line: `## Project: <name>`). Use it for team creation.
 
-4. **Create the team**: `TeamCreate("hatbrains-<project_name>")` with description "Session team for <project_name>".
+4. **Clear any stale team then create fresh**: call `TeamDelete("hatbrains-<project_name>")` first — this removes the old config and its stale `leadSessionId` so the next step registers the current session as lead. If it fails (team doesn't exist yet), continue. Then call `TeamCreate("hatbrains-<project_name>")` with description "Session team for <project_name>".
 
 5. **Detect plan mode**: Check if a system reminder says plan mode is active.
 
