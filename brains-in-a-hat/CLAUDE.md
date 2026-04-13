@@ -28,7 +28,7 @@ Plus tool-level hooks: `PreToolUse`, `PostToolUse`
 ## Key Files
 
 - `hooks/neal-persona.md` — Neal's full prompt: team roster, routing rules, task-list primacy, plan mode, model tiers, retro automation, pivot detection
-- `hooks/session-start` — bootstrap script (vault dirs, stale-state cleanup, source==compact detection); no persona injection — that happens via `/assemble`
+- `hooks/session-start` — bootstrap script (vault dirs, stale-state cleanup, source==compact detection). **Auto-greet**: if `<KEY>--session-log.md` or `<KEY>--index.md` exists in the vault, writes `active.<SID>` and emits `systemMessage` (visible Neal greeting) + `additionalContext` (instructs Claude to adopt Neal persona on first prompt). First-time projects still need `/assemble` to bootstrap.
 - `hooks/first-prompt-greeting` — detects `/assemble`, creates active flag, injects `gather-context` briefing, emits compaction recovery + retro-due + post-mortem instructions, injects CURRENT FOCUS on every prompt
 - `hooks/hooks.json` — hook wiring (all lifecycle events: UserPromptSubmit, SessionStart, SessionEnd, PreCompact, SubagentStart, SubagentStop, PreToolUse, PostToolUse)
 - `hooks/enforce-neal-allowlist` — PreToolUse catch-all: restricts Neal to read + delegate + tasks + curated read-only Bash; subagents bypass via in-subagent.* markers

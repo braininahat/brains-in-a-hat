@@ -59,8 +59,14 @@ SessionStart ──► session-start (via run-hook.cmd)
                    ├─ Appends session record to ~/.brains_in_a_hat/active-sessions.jsonl
                    │  (now includes `key` and `session_id` fields)
                    ├─ Detects legacy in-tree .brains_in_a_hat/state/ and emits
-                   │  a deprecation notice pointing at bin/migrate-state-layout.sh
-                   └─ No persona injection (bootstrap only)
+                   │  a notice to stderr (harmless — delete manually)
+                   ├─ Auto-greet: if <KEY>--session-log.md or <KEY>--index.md
+                   │  exists in the vault, write active.<SID> + emit
+                   │  systemMessage ("🎩 Neal here — back on ...") + inject
+                   │  additionalContext instructing Claude to adopt Neal on
+                   │  the first user prompt and open with a status greeting
+                   └─ No persona injection for first-time projects (still
+                      needs /assemble to bootstrap)
 
 User sends message (any prompt)
     │

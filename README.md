@@ -48,14 +48,20 @@ ln -s $PWD/minion           ~/.claude/plugins/minion
 
 ## Quick start — brains-in-a-hat
 
-Activate the team once per Claude Code session:
+First time in a project: type `/assemble` once to bootstrap the team. After that, **Neal auto-greets on every subsequent session** — the `SessionStart` hook detects prior team state (vault session log or index note for this project) and injects a status greeting via `systemMessage` + auto-activates team mode.
 
 ```
-/assemble
+/assemble       # first time only — bootstraps team for a new project
 ```
 
-![/assemble screenshot placeholder](./docs/img/assemble.png)
-<!-- Screenshot: the output of /assemble — "## Project: ...", "Key: ...", "Team: hatbrains-...", git state, pending proposals, and Neal's 3-5 line greeting. -->
+Subsequent sessions automatically open with:
+
+```
+🎩 Neal here — back on brains-in-a-hat (feat/per-key-state-vault, 3 dirty). Last focus: fix OAuth. What's up?
+```
+
+![auto-greet screenshot placeholder](./docs/img/auto-greet.png)
+<!-- Screenshot: fresh Claude Code session open, showing Neal's systemMessage greeting line immediately at the top of the conversation — before any user input. -->
 
 Neal (chief of staff) is now your team lead. He reads, routes, and delegates — but never writes code himself. Ask him anything:
 
@@ -186,27 +192,6 @@ Copy `brains-in-a-hat/examples/domain-config.json` to `<project>/.brains_in_a_ha
 ### User preferences
 
 `.brains_in_a_hat/user-preferences.json` — Reed observes workflow patterns and updates this over time. Controls communication style, tool preferences, engineering principles.
-
-## Upgrading from pre-v0.7
-
-Run the migration script once per host:
-
-```bash
-cd <any project dir>
-bash ~/.claude/plugins/brains-in-a-hat/bin/migrate-state-layout.sh --dry  # preview
-bash ~/.claude/plugins/brains-in-a-hat/bin/migrate-state-layout.sh         # apply
-```
-
-What it does:
-
-1. Visits each project in `~/.brains_in_a_hat/active-sessions.jsonl`, runs `gh repo view` to compute the new `<owner>-<name>` key.
-2. Moves in-tree `.brains_in_a_hat/state/` dirs to `~/.brains_in_a_hat/state/<key>/`.
-3. Renames vault files from `<gh-name>--*.md` to `<owner>-<name>--*.md`. **When two different repos share a short name, renames are skipped with a warning** — you'll need to manually re-key those (their decisions could belong to either project).
-4. Parks any rogue files at `~/.brains_in_a_hat/state/` root into `~/.brains_in_a_hat/state/_orphaned/` (these are leftovers from the cwd-relative bug fixed in v0.7).
-5. Bootstraps per-project `<key>--index.md` notes in the vault.
-
-![migration dry run placeholder](./docs/img/migration-dryrun.png)
-<!-- Screenshot: terminal output of `bash bin/migrate-state-layout.sh --dry` showing resolved keys, skipped paths, and planned renames. -->
 
 ## Quick start — archer
 

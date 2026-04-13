@@ -105,8 +105,7 @@ migrate_old_state() {
 detect_legacy_state() {
   [ -d ".brains_in_a_hat/state" ] || return 0
   if [ -n "$(ls -A .brains_in_a_hat/state 2>/dev/null)" ]; then
-    echo "[brains-in-a-hat] Deprecation: in-tree .brains_in_a_hat/state/ exists." >&2
-    echo "[brains-in-a-hat]   Run ${PLUGIN_ROOT}/bin/migrate-state-layout.sh to move it under ~/.brains_in_a_hat/state/<KEY>/." >&2
+    echo "[brains-in-a-hat] Legacy in-tree .brains_in_a_hat/state/ detected — delete it; state now lives at ~/.brains_in_a_hat/state/<KEY>/." >&2
   fi
 }
 
@@ -197,7 +196,57 @@ main() {
       >> "${BIH_HOME}/active-sessions.jsonl" 2>/dev/null || true
   fi
 
-  # No output — no persona injection. User activates team mode with /assemble.
+  # ── Auto-activate + greet if this project has prior team state ────
+  # Detection: vault session log or index note exists for this KEY.
+  # When detected:
+  #   - write active.${SID} so all downstream hooks treat the team as active
+  #   - emit systemMessage: visible status line so the user sees Neal "greet"
+  #     immediately on session open
+  #   - emit additionalContext: instructs Claude (Neal) to open with a full
+  #     greeting on the first user prompt, regardless of what the user types
+  local SESSION_LOG="${VAULT_DIR}/${KEY}--session-log.md"
+  local INDEX_NOTE="${VAULT_DIR}/${KEY}--index.md"
+  if [ -f "$SESSION_LOG" ] || [ -f "$INDEX_NOTE" ]; then
+    echo "active" > "${SDIR}/active.${SID}"
+
+    local project_name branch dirty_count focus team_name
+    project_name=$(detect_project_name)
+    branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "no-git")
+    dirty_count=$(git status --short 2>/dev/null | wc -l | tr -d ' ')
+    focus=""
+    if [ -f "${SDIR}/session-state.json" ]; then
+      focus=$(jq -r '.current_focus // ""' "${SDIR}/session-state.json" 2>/dev/null || echo "")
+    fi
+    team_name=$(cat "${SDIR}/team-name" 2>/dev/null || team_name_for_key "${KEY}")
+
+    local greeting
+    if [ -n "$focus" ]; then
+      greeting="🎩 Neal here — back on ${project_name} (${branch}, ${dirty_count} dirty). Last focus: ${focus}. What's up?"
+    else
+      greeting="🎩 Neal here — back on ${project_name} (${branch}, ${dirty_count} dirty). What's up?"
+    fi
+
+    local additional_ctx
+    additional_ctx=$(cat <<EOF
+AUTO-GREET: brains-in-a-hat team is active for project '${KEY}' (team_name: ${team_name}).
+Read \$CLAUDE_PLUGIN_ROOT/hooks/neal-persona.md fully and adopt the Neal persona NOW.
+
+On your very first response — regardless of what the user types — open with a brief status
+greeting covering: project name, branch, dirty file count, last focus from session-state.json,
+any pending retros or post-mortems. Then address the user's actual prompt. Example opening:
+
+  "Neal here. Back on ${project_name} (${branch}, ${dirty_count} dirty). ${focus:+Last focus: ${focus}. }<continue addressing their prompt>..."
+
+Do NOT ask "how can I help" — assume continuation of prior work. Do NOT re-run /assemble —
+the team is already active for this session.
+EOF
+)
+
+    jq -nc \
+      --arg sm "$greeting" \
+      --arg ctx "$additional_ctx" \
+      '{systemMessage:$sm, hookSpecificOutput:{hookEventName:"SessionStart", additionalContext:$ctx}}'
+  fi
 }
 
 main

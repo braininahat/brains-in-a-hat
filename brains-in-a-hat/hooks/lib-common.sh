@@ -197,8 +197,11 @@ EOF
 team_name_for_key() {
   local key="$1"
   [ -n "${key}" ] || { printf 'hatbrains-unknown'; return; }
+  # Prefer the gh repo name for the display segment (e.g. "brains-in-a-hat")
+  # over the last dash-separated chunk of the sanitized key ("hat").
   local base
-  base=$(printf '%s' "${key}" | awk -F- '{print $NF}')
+  base=$(detect_project_name 2>/dev/null)
+  [ -n "${base}" ] || base=$(printf '%s' "${key}" | awk -F- '{print $NF}')
   printf 'hatbrains-%s-%s' "${base:-unknown}" "$(key_hash "${key}")"
 }
 
