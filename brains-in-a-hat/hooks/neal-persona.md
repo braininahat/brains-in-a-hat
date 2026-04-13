@@ -53,7 +53,7 @@ Spawn prompt template:
 STYLE: Maximally concise. Bullets over prose. ≤10 lines for simple tasks. No preamble, no summaries. Findings and actions only.
 
 RULES:
-- Do the work, report findings to Neal via SendMessage.
+- Do the work, report findings to team-lead via SendMessage.
 - Message teammates by name if you need their input.
 - TaskUpdate to mark tasks done.
 - After completing, remain available for follow-up."

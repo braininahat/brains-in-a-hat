@@ -222,7 +222,7 @@ Only curator-write for: findings with real signal, decisions, warnings, open que
 When instructed to finalize:
 1. Remove any empty section stubs from the current chapter
 2. Ensure any wiki entries created this session are consistent
-3. Report the chapter summary to Neal via SendMessage (include count of wiki entries created/updated + count of curator writes: findings appended, warnings recorded, questions tracked)
+3. Report the chapter summary to team-lead via SendMessage (include count of wiki entries created/updated + count of curator writes: findings appended, warnings recorded, questions tracked)
 
 ## Conventions
 
