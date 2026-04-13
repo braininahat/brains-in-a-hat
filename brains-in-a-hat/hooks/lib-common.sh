@@ -13,17 +13,53 @@ SESSIONS_DIR="${BIH_HOME}/sessions"
 STATE_ROOT="${BIH_HOME}/state"
 
 # ── Key derivation ────────────────────────────────────────────────────
-# KEY is a stable, sanitized absolute path to the git worktree root (or
-# pwd if not a git repo). Matches Claude Code's own project-scoping at
-# ~/.claude/projects/<sanitized-abs-path>/.
+# KEY = "<owner>-<name>" via `gh repo view --json owner,name`. Two
+# genuinely different repos with the same short name get distinct keys
+# because their GitHub owners differ. Two worktrees of the SAME repo
+# also share state/vault by default (same owner-name).
 #
-# Example: /home/varun/repos/esc/ultrasuite-analysis
-#       →  -home-varun-repos-esc-ultrasuite-analysis
+# Worktree disambiguation: if a different cwd is already active under
+# this key, append a 6-char hash of the current worktree root. That way
+# two parallel sessions on two worktrees of the same repo get distinct
+# keys instead of thrashing.
+#
+# Fallback (rare — project without git or without gh auth): sanitized
+# absolute worktree root. Non-version-controlled projects are not a
+# first-class target.
+#
+# Example: /mnt/hdd/repos/personal/brains-in-a-hat → braininahat-brains-in-a-hat
 
 detect_project_key() {
-  local root
-  root=$(git rev-parse --show-toplevel 2>/dev/null) || root=""
-  [ -n "${root}" ] || root="$(pwd)"
+  local owner name preferred root cwd_hash sdir cwd_file found
+  owner=$(gh repo view --json owner -q '.owner.login' 2>/dev/null || true)
+  name=$(gh repo view --json name -q '.name' 2>/dev/null || true)
+
+  if [ -n "${owner}" ] && [ -n "${name}" ]; then
+    preferred=$(printf '%s-%s' "${owner}" "${name}" | sed 's|/|-|g')
+
+    root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+    root=$(realpath "${root}" 2>/dev/null || printf '%s' "${root}")
+    cwd_hash=$(printf '%s' "${root}" | sha256sum | head -c 6)
+
+    sdir="${STATE_ROOT}/${preferred}"
+    if [ -d "${sdir}" ] && ls "${sdir}"/active.* &>/dev/null; then
+      found=0
+      for cwd_file in "${sdir}"/cwd.*; do
+        [ -f "${cwd_file}" ] || continue
+        if [ "$(cat "${cwd_file}" 2>/dev/null)" = "${root}" ]; then
+          found=1
+          break
+        fi
+      done
+      [ "${found}" = "0" ] && preferred="${preferred}-${cwd_hash}"
+    fi
+
+    printf '%s' "${preferred}"
+    return
+  fi
+
+  # Fallback: sanitized abs worktree root (not a GitHub repo)
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || root="$(pwd)"
   root=$(realpath "${root}" 2>/dev/null || printf '%s' "${root}")
   printf '%s' "${root}" | sed 's|/|-|g'
 }

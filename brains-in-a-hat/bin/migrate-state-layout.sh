@@ -3,22 +3,22 @@
 # migrate-state-layout.sh — one-shot migration to per-key state layout.
 #
 # v0.7+ moves all runtime state out of in-tree .brains_in_a_hat/state/ to
-# ~/.brains_in_a_hat/state/<KEY>/, and renames vault files from
-# <project>--*.md to <KEY>--*.md so two checkouts of the same repo don't
-# collide on the gh repo name.
+# ~/.brains_in_a_hat/state/<KEY>/ where KEY = <owner>-<name> (from gh),
+# and renames vault files from <gh-name>--*.md to <owner-name>--*.md.
 #
 # Idempotent. Safe to re-run. --dry shows what would change without writing.
 #
 # Actions:
-#   1. Build {project_path → key} and {gh_name → key} maps from
-#      ~/.brains_in_a_hat/active-sessions.jsonl (so we know which projects
-#      have ever activated the team and what their canonical keys are).
+#   1. Visit each project path in ~/.brains_in_a_hat/active-sessions.jsonl.
+#      For each existing path, run `gh repo view` to compute the new
+#      owner-name key. Build {project_path → key} and {gh_name → key} maps.
 #   2. For each known project: move its in-tree .brains_in_a_hat/state/
-#      contents to ~/.brains_in_a_hat/state/<key>/.
-#   3. Rename vault files <project>--*.md → <key>--*.md (using gh_name → key).
+#      contents to ~/.brains_in_a_hat/state/<key>/. Skip when old is
+#      already under BIH_HOME (recursive move case).
+#   3. Rename vault files <gh-name>--*.md → <owner-name>--*.md.
 #   4. Bootstrap per-project index notes via ensure_vault_index for each key.
-#   5. Park rogue files at ~/.brains_in_a_hat/state/* root level (from the
-#      cwd-relative bug pre-v0.7) under ~/.brains_in_a_hat/state/_orphaned/.
+#   5. Park rogue files at ~/.brains_in_a_hat/state/* root level under
+#      ~/.brains_in_a_hat/state/_orphaned/.
 #   6. Best-effort: rewrite `project:` frontmatter in vault notes to use KEY.
 
 set -euo pipefail
@@ -43,39 +43,68 @@ run() {
   fi
 }
 
+# Compute owner-name key for a given project directory. Must cd there
+# because gh reads from the current git repo. Returns empty string if
+# the path doesn't exist or gh can't resolve owner/name.
+compute_owner_name_key() {
+  local proj="$1"
+  [ -d "$proj" ] || { printf ''; return; }
+  local owner name
+  owner=$(cd "$proj" && gh repo view --json owner -q '.owner.login' 2>/dev/null || true)
+  name=$(cd "$proj" && gh repo view --json name -q '.name' 2>/dev/null || true)
+  if [ -n "$owner" ] && [ -n "$name" ]; then
+    printf '%s-%s' "$owner" "$name" | sed 's|/|-|g'
+  fi
+}
+
 # ── Step 1: build project → key and gh-name → key maps ───────────────
 
-declare -A PROJECT_KEYS   # absolute project path → key
-declare -A NAME_KEYS      # gh repo name → key (with collision detection)
-declare -A NAME_PATHS     # gh repo name → first project path seen (for collision msg)
+declare -A PROJECT_KEYS      # absolute project path → owner-name key
+declare -A NAME_KEYS         # gh short name → owner-name key (unique)
+declare -A NAME_COLLISIONS   # gh short name → " key1 key2 ..." when ambiguous
+SKIPPED_PATHS=()             # paths that don't exist or aren't gh repos
 
 if [ -f "${BIH_HOME}/active-sessions.jsonl" ]; then
+  declare -A SEEN_PROJ
   while IFS= read -r line; do
     p=$(echo "$line" | jq -r '.project // empty' 2>/dev/null) || continue
     n=$(echo "$line" | jq -r '.name // empty' 2>/dev/null) || true
-    k=$(echo "$line" | jq -r '.key // empty' 2>/dev/null) || true
     [ -n "$p" ] || continue
-    if [ -z "$k" ] || [ "$k" = "null" ]; then
-      # Legacy entry (no .key field): compute key from project path.
-      # realpath fails on missing/unmounted paths — fall back to the
-      # raw path verbatim so dead entries don't abort the script.
-      resolved=$(realpath "$p" 2>/dev/null || true)
-      [ -n "$resolved" ] || resolved="$p"
-      k=$(printf '%s' "$resolved" | sed 's|/|-|g')
-      [[ "$k" == -* ]] || k="-${k#-}"
+    # Skip duplicate entries for the same path (active-sessions.jsonl
+    # has many per project)
+    [ -n "${SEEN_PROJ[$p]:-}" ] && continue
+    SEEN_PROJ["$p"]=1
+
+    k=$(compute_owner_name_key "$p" 2>/dev/null || true)
+    if [ -z "$k" ]; then
+      SKIPPED_PATHS+=("$p")
+      continue
     fi
     PROJECT_KEYS["$p"]="$k"
     if [ -n "$n" ] && [ "$n" != "null" ]; then
-      if [ -n "${NAME_KEYS[$n]:-}" ] && [ "${NAME_KEYS[$n]}" != "$k" ]; then
-        warn "gh repo name collision: '$n' maps to BOTH '${NAME_KEYS[$n]}' (from ${NAME_PATHS[$n]}) and '$k' (from $p). First-wins applied; verify manually."
-      else
+      existing="${NAME_KEYS[$n]:-}"
+      if [ -z "$existing" ]; then
         NAME_KEYS["$n"]="$k"
-        NAME_PATHS["$n"]="$p"
+      elif [ "$existing" != "$k" ]; then
+        # Collision: multiple owner-name keys share the same short gh name.
+        # Record the set, unset the single mapping — rename step will skip.
+        NAME_COLLISIONS["$n"]="${NAME_COLLISIONS[$n]:-${existing}} ${k}"
       fi
     fi
   done < "${BIH_HOME}/active-sessions.jsonl"
+
+  # For any collided names, report and remove the single-valued mapping.
+  for n in "${!NAME_COLLISIONS[@]}"; do
+    warn "gh short name '$n' maps to multiple owner-name keys: ${NAME_COLLISIONS[$n]} — vault renames for this prefix will be SKIPPED (manual disambiguation required)."
+    unset "NAME_KEYS[$n]"
+  done
 fi
-say "Discovered ${#PROJECT_KEYS[@]} project(s) in active-sessions.jsonl"
+
+say "Resolved ${#PROJECT_KEYS[@]} project(s) to owner-name keys"
+if [ "${#SKIPPED_PATHS[@]}" -gt 0 ]; then
+  say "Skipped ${#SKIPPED_PATHS[@]} path(s) (not a gh repo, missing, or unreachable):"
+  printf '  %s\n' "${SKIPPED_PATHS[@]}" | sort -u
+fi
 
 # ── Step 2: relocate in-tree state to per-key dirs ───────────────────
 
@@ -83,6 +112,15 @@ for proj in "${!PROJECT_KEYS[@]}"; do
   key="${PROJECT_KEYS[$proj]}"
   old="${proj}/.brains_in_a_hat/state"
   [ -d "$old" ] || continue
+  # Skip if $old is already inside BIH_HOME (rogue writes from cwd=$HOME
+  # — these get handled by the orphan step).
+  old_real=$(realpath "$old" 2>/dev/null || printf '%s' "$old")
+  case "$old_real" in
+    "${BIH_HOME}"*)
+      say "Skip recursive move: $old is under ${BIH_HOME} (will be orphaned if loose)"
+      continue
+      ;;
+  esac
   new=$(state_dir "$key")
   say "Move in-tree state: $old → $new"
   run mkdir -p "$new"
@@ -94,21 +132,27 @@ for proj in "${!PROJECT_KEYS[@]}"; do
   fi
 done
 
-# ── Step 3: rename vault files <project>--*.md → <key>--*.md ─────────
+# ── Step 3: rename vault files <gh-name>--*.md → <owner-name>--*.md ──
 
 if [ -d "$VAULT_DIR" ]; then
   shopt -s nullglob
   for f in "${VAULT_DIR}"/*.md; do
     [ -f "$f" ] || continue
     base=$(basename "$f")
-    # Skip files that don't match the prefix pattern
     case "$base" in
       *--*) ;;
       *) continue ;;
     esac
     prefix="${base%%--*}"
     rest="${base#*--}"
-    # Skip if already key-prefixed (starts with -)
+    # Skip owner-name-shaped prefixes (contain a dash, could already be migrated)
+    # — actual check: is this prefix a value in NAME_KEYS already? then skip
+    ALREADY=0
+    for v in "${NAME_KEYS[@]}"; do
+      [ "$prefix" = "$v" ] && { ALREADY=1; break; }
+    done
+    [ "$ALREADY" = "1" ] && continue
+    # Skip legacy path-based keys (start with -)
     case "$prefix" in
       -*) continue ;;
     esac
@@ -134,7 +178,9 @@ fi
 
 # ── Step 4: bootstrap per-project index notes ────────────────────────
 
-for key in "${PROJECT_KEYS[@]}"; do
+declare -A UNIQUE_KEYS
+for v in "${PROJECT_KEYS[@]}"; do UNIQUE_KEYS["$v"]=1; done
+for key in "${!UNIQUE_KEYS[@]}"; do
   if [ "$DRY" = "1" ]; then
     echo "+ ensure_vault_index $key"
   else
@@ -163,23 +209,29 @@ if [ "$ANY_ROGUE" = "1" ]; then
 fi
 shopt -u nullglob
 
-# ── Step 6: rewrite project: frontmatter to use KEY (best-effort) ────
+# ── Step 6: rewrite project: frontmatter to use new KEY ──────────────
 
 if [ -d "$VAULT_DIR" ]; then
   shopt -s nullglob
   for f in "${VAULT_DIR}"/*.md; do
     [ -f "$f" ] || continue
     base=$(basename "$f")
+    # Only rewrite files whose prefix is now a known owner-name key
     case "$base" in
-      -*--*) ;;
+      *--*) ;;
       *) continue ;;
     esac
-    key="${base%%--*}"
+    prefix="${base%%--*}"
+    KNOWN=0
+    for v in "${PROJECT_KEYS[@]}"; do
+      [ "$prefix" = "$v" ] && { KNOWN=1; break; }
+    done
+    [ "$KNOWN" = "1" ] || continue
     if grep -q '^project:' "$f" 2>/dev/null; then
       if [ "$DRY" = "1" ]; then
-        echo "+ sed -i 's|^project:.*|project: \"${key}\"|' $f"
+        echo "+ sed -i 's|^project:.*|project: \"${prefix}\"|' $f"
       else
-        sed -i "s|^project:.*|project: \"${key}\"|" "$f"
+        sed -i "s|^project:.*|project: \"${prefix}\"|" "$f"
       fi
     fi
   done

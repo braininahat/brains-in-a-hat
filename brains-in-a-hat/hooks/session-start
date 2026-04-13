@@ -118,7 +118,7 @@ cleanup_state_dir() {
   local sdir="$1" sid="$2"
   local marker prefix
 
-  for prefix in active missing-shown skills-cache-built gather-context-emitted post-mortem-emitted compact-pending; do
+  for prefix in active cwd missing-shown skills-cache-built gather-context-emitted post-mortem-emitted compact-pending; do
     for marker in "${sdir}/${prefix}".*; do
       [ -f "$marker" ] || continue
       [ "${marker##*/${prefix}.}" = "$sid" ] || rm -f "$marker"
@@ -152,16 +152,21 @@ main() {
   KEY=$(detect_project_key)
   bootstrap_dirs "${KEY}"
 
-  local SDIR
+  local SDIR CWD_ROOT
   SDIR=$(state_dir "${KEY}")
+  CWD_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+  CWD_ROOT=$(realpath "${CWD_ROOT}" 2>/dev/null || printf '%s' "${CWD_ROOT}")
 
   # From here on, log to per-key debug log
   exec 2>> "${SDIR}/hook-debug.log"
 
   # Write the SID → key lookup (the linchpin of every other hook)
+  # and the cwd marker (used by detect_project_key for worktree
+  # disambiguation on subsequent sessions).
   if [ -n "${SID}" ]; then
     local f="${SESSIONS_DIR}/${SID}.key"
     printf '%s' "${KEY}" > "${f}.tmp.$$" && mv "${f}.tmp.$$" "${f}"
+    printf '%s' "${CWD_ROOT}" > "${SDIR}/cwd.${SID}"
   fi
 
   # Cache team name for /assemble
