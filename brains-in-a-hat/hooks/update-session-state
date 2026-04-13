@@ -1,38 +1,24 @@
 #!/usr/bin/env bash
 # Update session-state.json atomically with a directory-based lock.
 # Reads stdin JSON (Claude Code tool-use input), extracts agent name,
-# appends to spawned_agents, updates last_updated. Per-key state.
+# appends to spawned_agents, updates last_updated. Safe under concurrent sessions.
 #
 # Schema preserved:
 #   spawned_agents[], decisions[], last_updated,
 #   current_focus, active_tasks[], findings[], open_questions[], warnings[]
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-source "${SCRIPT_DIR}/lib-common.sh"
-
-LOGFILE="${BIH_HOME}/state/_bootstrap.log"
-mkdir -p "$(dirname "$LOGFILE")" 2>/dev/null || true
-exec 2>> "$LOGFILE"
+# Only update when team is active
+ls .brains_in_a_hat/state/active.* &>/dev/null || exit 0
 
 INPUT=$(cat)
-SID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SID=""
-[ -n "$SID" ] || exit 0
-KEY=$(read_session_key "$SID")
-[ -n "$KEY" ] || exit 0
-SDIR=$(state_dir "$KEY")
-exec 2>> "${SDIR}/hook-debug.log"
-
-# Only update when team is active for this session's key
-ls "${SDIR}"/active.* &>/dev/null || exit 0
-
 AGENT=$(echo "$INPUT" | jq -r '.tool_input.name // .tool_input.subagent_type // "agent"' 2>/dev/null) || exit 0
 [ -z "$AGENT" ] || [ "$AGENT" = "null" ] && exit 0
 
-STATE="${SDIR}/session-state.json"
+STATE=".brains_in_a_hat/state/session-state.json"
 LOCK="${STATE}.lock.d"
 
-# Acquire lock: mkdir is atomic on POSIX. Retry 5x with 100ms backoff.
+# Acquire lock: mkdir is atomic on POSIX filesystems. Retry 5x with 100ms backoff.
 acquired=0
 for _ in 1 2 3 4 5; do
   if mkdir "$LOCK" 2>/dev/null; then
@@ -41,13 +27,17 @@ for _ in 1 2 3 4 5; do
   fi
   sleep 0.1
 done
+
+# Couldn't acquire lock — state-update failure is non-fatal (agent still runs)
 [ "$acquired" = "1" ] || exit 0
+
+# Ensure lock is removed even on script failure
 trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
 
-# Initialize state file if absent
+# Initialize state file if absent (new schema)
 [ -f "$STATE" ] || echo '{"spawned_agents":[],"decisions":[],"last_updated":"","current_focus":"","active_tasks":[],"findings":[],"open_questions":[],"warnings":[]}' > "$STATE"
 
-# Backward-compat: ensure all schema fields exist
+# Ensure all schema fields exist in older state files (backward-compat)
 jq 'if has("decisions") then . else . + {decisions:[]} end
     | if has("current_focus") then . else . + {current_focus:""} end
     | if has("active_tasks") then . else . + {active_tasks:[]} end
@@ -55,6 +45,7 @@ jq 'if has("decisions") then . else . + {decisions:[]} end
     | if has("open_questions") then . else . + {open_questions:[]} end
     | if has("warnings") then . else . + {warnings:[]} end' "$STATE" > "${STATE}.tmp.$$" && mv "${STATE}.tmp.$$" "$STATE"
 
+# Read-modify-write (now safe under lock)
 jq --arg agent "$AGENT" --arg ts "$(date -Iseconds)" \
   '.spawned_agents = (.spawned_agents + [$agent] | unique) | .last_updated = $ts' \
   "$STATE" > "${STATE}.tmp.$$" && mv "${STATE}.tmp.$$" "$STATE"

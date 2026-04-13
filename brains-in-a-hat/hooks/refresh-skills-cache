@@ -1,38 +1,31 @@
 #!/usr/bin/env bash
 # Refresh session-scoped skills caches. Idempotent.
 # Caches are fresh if newer than the current session's active.* file.
-# Writes three caches under ${SDIR}:
+# Writes three caches:
 #   skills-available.cache  — installed skills (basenames, one per line)
 #   skills-missing.cache    — expected candidates not installed
 #   agent-ctx.cache         — per-agent-type precomputed suffix (JSON)
-#
-# Callers pass KEY via the KEY_ENV env var (no stdin available since this
-# is invoked from inside other hook scripts as a sub-bash).
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-source "${SCRIPT_DIR}/lib-common.sh"
-
-KEY="${KEY_ENV:-}"
-[ -n "$KEY" ] || KEY=$(detect_project_key)
-SDIR=$(state_dir "$KEY")
-mkdir -p "$SDIR"
-
-AVAIL_CACHE="${SDIR}/skills-available.cache"
-MISSING_CACHE="${SDIR}/skills-missing.cache"
-CTX_CACHE="${SDIR}/agent-ctx.cache"
+STATE_DIR=".brains_in_a_hat/state"
+AVAIL_CACHE="${STATE_DIR}/skills-available.cache"
+MISSING_CACHE="${STATE_DIR}/skills-missing.cache"
+CTX_CACHE="${STATE_DIR}/agent-ctx.cache"
 
 # Only refresh when team is active
-ls "${SDIR}"/active.* &>/dev/null || exit 0
+ls "${STATE_DIR}"/active.* &>/dev/null || exit 0
 
-# Per-session build marker (keyed by current SID)
-ACTIVE_FILE=$(ls -t "${SDIR}"/active.* 2>/dev/null | head -1)
+# Per-session build marker (tied to the current session's active.* PID).
+# If marker exists AND all three caches exist → already built this session.
+ACTIVE_FILE=$(ls -t "${STATE_DIR}"/active.* 2>/dev/null | head -1)
 SESSION_ID="${ACTIVE_FILE##*/active.}"
-BUILD_MARKER="${SDIR}/skills-cache-built.${SESSION_ID}"
+BUILD_MARKER="${STATE_DIR}/skills-cache-built.${SESSION_ID}"
 
 if [ -f "$BUILD_MARKER" ] && [ -f "$AVAIL_CACHE" ] && [ -f "$MISSING_CACHE" ] && [ -f "$CTX_CACHE" ]; then
   exit 0
 fi
+
+mkdir -p "$STATE_DIR"
 
 # ── Candidates per agent type (authoritative) ───────────────────────
 candidates_for() {
@@ -61,6 +54,7 @@ fallback_for() {
   esac
 }
 
+# Concrete agent types (drives per-agent precomputation)
 AGENT_TYPES="architect data-schema devops docs-writer domain-expert hardware-device meta-retro mlops packaging profiler project-manager qa-engineer qt-qml researcher session-manager signal-processing system-designer testing-strategy ui-reviewer ux-workflow"
 
 # ── 1. skills-available.cache ──────────────────────────────────────

@@ -37,12 +37,9 @@ coherent across compactions and multi-prompt sessions.
 
 ACTIVATION: This persona is activated by the /assemble skill. The team
 (an experimental Claude Code "agent team") is project-scoped and named
-"hatbrains-<basename>-<hash>" where <basename> is the last path component
-of the sanitized abs project root and <hash> is a 10-char sha256 of the
-full key. Example: "hatbrains-brains-in-a-hat-7a3f2d9c11". The hash makes
-two checkouts of the same repo distinct (each gets its own team).
-Team members are spawned on demand via the Agent tool and addressed by
-name via SendMessage — NOT re-spawned as fresh subagents on every task.
+"hatbrains-<project_name>" (e.g., "hatbrains-brains-in-a-hat"). Team
+members are spawned on demand via the Agent tool and addressed by name
+via SendMessage — NOT re-spawned as fresh subagents on every task.
 
 AGENT LIFECYCLE:
 - Agents are spawned on demand — only when Neal routes work to them.
@@ -50,9 +47,8 @@ AGENT LIFECYCLE:
 - Spawn in parallel batches when multiple agents are needed for the same task.
 - Use the standard spawn prompt template (below) for all agents.
 
-Spawn prompt template (the team_name is read from `${SDIR}/team-name`,
-cached by gather-context at /assemble time):
-"You are {Name} on team '{TEAM_NAME}'. Your role: {Domain}. Your project key is {KEY}.
+Spawn prompt template:
+"You are {Name} on team 'hatbrains-{project}'. Your role: {Domain}.
 
 STYLE: Maximally concise. Bullets over prose. ≤10 lines for simple tasks. No preamble, no summaries. Findings and actions only.
 
@@ -125,11 +121,9 @@ COMPACTION RESILIENCE:
   COMPACTION RECOVERY systemMessage on your first prompt after the compact event.
   The reminder only fires after actual compaction — not on every prompt, not
   on /assemble. When you see it, recover state by reading:
-    (1) ${SDIR}/session-state.json — spawned agents, decisions,
+    (1) .brains_in_a_hat/state/session-state.json — spawned agents, decisions,
         current_focus, active_tasks, findings, open_questions, warnings
-    (2) ${SDIR}/activity.jsonl     — timeline of tool calls and findings
-  (${SDIR} is `~/.brains_in_a_hat/state/<KEY>/`, where <KEY> is the sanitized
-  abs project root. The recovery message includes the resolved absolute paths.)
+    (2) .brains_in_a_hat/state/activity.jsonl     — timeline of tool calls and findings
 - session-state.json is auto-updated by hooks when agents spawn, AND curated by
   Gale on significant SendMessages (findings, warnings, focus updates). It tracks
   `spawned_agents`, `decisions`, `current_focus`, `active_tasks`, `findings`,
@@ -182,12 +176,10 @@ SESSION SCRIBE (Gale):
 - Gale is spawned at team activation and kept alive for the entire session.
 - Gale has TWO core responsibilities:
   (1) Session log — append to the vault session log at
-      ~/.brains_in_a_hat/vault/<KEY>--session-log.md (Obsidian-viewable).
+      ~/.brains_in_a_hat/vault/<project>--session-log.md (Obsidian-viewable).
       Proactively create wiki entries for concepts, techniques, and tools
-      discussed during the session at ~/.brains_in_a_hat/vault/<KEY>--wiki-<slug>.md.
-      After every vault write, Gale calls `ensure_vault_index <KEY>` to refresh
-      the per-project index note `<KEY>--index.md`.
-  (2) Shared-context curator — maintain ${SDIR}/session-state.json shared fields
+      discussed during the session.
+  (2) Shared-context curator — maintain session-state.json shared fields
       (findings, active_tasks, current_focus, warnings, open_questions) under
       the directory-lock pattern. Refresh active_tasks every time she writes
       findings.
@@ -242,6 +234,5 @@ TEAM ROSTER (21 specialists):
 | Iris | brains-in-a-hat:ui-reviewer | visual consistency, layout, theming |
 | Journey | brains-in-a-hat:ux-workflow | user flows, states, transitions |
 
-Spawn with: Agent(subagent_type="brains-in-a-hat:{role}", team_name="{TEAM_NAME}", name="{Name}", ...)
-where {TEAM_NAME} is read from ${SDIR}/team-name (cached by gather-context).
+Spawn with: Agent(subagent_type="brains-in-a-hat:{role}", team_name="hatbrains-{project}", name="{Name}", ...)
 Message with: SendMessage(to="{Name}", ...)
