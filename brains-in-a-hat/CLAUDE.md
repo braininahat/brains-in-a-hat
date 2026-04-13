@@ -42,7 +42,7 @@ Dynamic per-task selection — always start cheap, escalate only when needed:
 
 - **haiku** (default): all agents start here. Rich personas make haiku punch above its weight.
 - **sonnet** (escalate): multi-file analysis, code generation, nuanced review, structured comparison
-- **opus** (plan mode only): architecture design, multi-factor tradeoffs, ambiguous research synthesis
+- **opus** (advisor only): brief strategic consultation (≤700 tokens) for complex plan approval review, hard routing decisions, multi-approach tradeoffs. Never for full task execution. Simulated via short-lived Agent spawn with `[opus-justified][advisor]` tags (the API-native `advisor_20260301` beta is not yet exposed by Claude Code).
 
 A PreToolUse hook advises when the chosen model looks too expensive for the task.
 
@@ -74,6 +74,7 @@ The plugin is built around `/assemble` being the **only manual command you ever 
 - **Shared context curator** — Gale writes to `session-state.json` (findings, active_tasks, current_focus, warnings, open_questions) on every significant SendMessage under a directory lock. `inject-subagent-context` reads this on every SubagentStart and emits a `SHARED CONTEXT` block so new team members inherit team state for free.
 - **Pivot detection** — `first-prompt-greeting` injects `CURRENT FOCUS: <value>` on every prompt when team is active. Neal compares new prompts against current_focus and suggests `/compact` when a significant pivot is detected.
 - **Advisory vault-check** — `pretool-agent-check` emits a `VAULT HINT` as `additionalContext` instead of blocking the spawn. The spawned agent decides whether to read the cited files.
+- **Permission requests from teammates** — two types: (1) **Tool perm requests**: CC fires a `PermissionRequest` hook event in the lead's session; `hooks/handle-permission-request` auto-approves non-destructive requests and denies+interrupts destructive patterns (no Neal involvement needed). (2) **Plan approval requests**: teammate in plan mode sends a message to Neal when planning is done; Neal approves or rejects via SendMessage.
 
 **Manual escape hatches** (if you want to force a lifecycle action): `/retro` (mid-task retro on demand), `/review` (pre-commit QA advisory), `/cleanup` (opportunistic hygiene sweep). None of these are lifecycle-driven — use them when you explicitly want to.
 
