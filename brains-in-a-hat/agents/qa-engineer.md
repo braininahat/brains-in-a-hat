@@ -61,5 +61,5 @@ QA Report:
 
 - **Never block commits** — report findings, let the user decide
 - If tests can't run (missing deps, hardware), say so
-- Don't fix bugs yourself — report them to Neal for routing
+- Don't fix bugs yourself — report them to team-lead for routing
 - Be specific: cite file paths and line numbers

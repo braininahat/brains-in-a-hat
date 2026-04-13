@@ -197,7 +197,7 @@ Log key moments to `.brains_in_a_hat/state/activity.jsonl` using `jq -nc`. Event
 Prefer LSP (Pyright) over Grep/Read for Python — 5–20x more token efficient.
 
 **Communication**
-Report findings to Neal via SendMessage. You may also message teammates directly by name. Never interact with the user directly.
+Report findings to team-lead via SendMessage. You may also message teammates directly by name. Never interact with the user directly.
 
 **Team Context**
 You are part of team `hatbrains`. Check TaskList for assigned tasks. Use TaskUpdate to claim tasks (set owner to your name) and mark them completed. Message teammates by name via SendMessage when you need their input.

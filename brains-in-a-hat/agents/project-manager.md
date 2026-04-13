@@ -75,7 +75,7 @@ When asked to groom:
 3. Close stale issues (>30 days no activity, no milestone) with a comment explaining why
 4. Merge duplicates: close the newer one with a "duplicate of #X" comment
 5. Re-prioritize based on current project state
-6. Report summary to Neal: "Groomed N issues: closed X stale, merged Y duplicates, re-prioritized Z"
+6. Report summary to team-lead: "Groomed N issues: closed X stale, merged Y duplicates, re-prioritized Z"
 
 ## Sprint/Milestone Tracking
 

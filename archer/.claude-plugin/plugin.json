@@ -1,7 +1,7 @@
 {
   "name": "archer",
   "description": "Publication-quality scientific visualization — ML architecture diagrams, TikZ rendering, Typst reports, and data plots following petarv/janosh visual principles",
-  "version": "0.1.35",
+  "version": "0.1.36",
   "author": { "name": "braininahat" },
   "homepage": "https://github.com/braininahat/brains-in-a-hat",
   "repository": "https://github.com/braininahat/brains-in-a-hat",

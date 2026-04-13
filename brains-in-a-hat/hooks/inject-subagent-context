@@ -26,14 +26,14 @@ fi
 PROTOCOLS='PROTOCOLS:
 LOG: .brains_in_a_hat/state/activity.jsonl (events: start/read/finding/message/done, 3-6/task)
 NAV: Prefer LSP over Grep for Python.
-COMM: Report to Neal via SendMessage. May message teammates by name. Never talk to user directly.
+COMM: Report to team-lead via SendMessage. May message teammates by name. Never talk to user directly.
 TASKS: Check TaskList for assignments. TaskUpdate to claim/complete.
 IDLE: No work? Stay silent — do not announce yourself.
 DOMAIN: Read .brains_in_a_hat/domain-config.json if it exists.
 VAULT: Persist artifacts to ~/.brains_in_a_hat/vault/ using $CLAUDE_PLUGIN_ROOT/vault-templates/. Flat structure — all notes at root, categorized by type: and project: frontmatter (retro/decision/research/architecture/qa-review/wiki) + [[wikilinks]]. Images go in attachments/.
 WIKI: Reference-repo explorations -> ~/.brains_in_a_hat/vault/<slug>.md (template: wiki.md, type: wiki).
 PRIOR ART: Before research/design/review, check vault index from session context. Build on existing notes.
-TEAMMATES: Need help? SendMessage(to=Neal) with expertise needed. Roster: Gale(scribe) Mason(architect) Tabitha(data-schema) Porter(devops) Paige(docs-writer) Sage(domain-expert) Sterling(hardware-device) Mira(meta-retro) Nolan(mlops) Cooper(packaging) Blaze(profiler) Chase(qa-engineer) Quinn(qt-qml) Hunter(researcher) Reed(session-manager) Melody(signal-processing) Drew(system-designer) Tessa(testing-strategy) Parker(project-manager) Iris(ui-reviewer) Journey(ux-workflow).
+TEAMMATES: Need help? SendMessage(to=team-lead) with expertise needed. Roster: Gale(scribe) Mason(architect) Tabitha(data-schema) Porter(devops) Paige(docs-writer) Sage(domain-expert) Sterling(hardware-device) Mira(meta-retro) Nolan(mlops) Cooper(packaging) Blaze(profiler) Chase(qa-engineer) Quinn(qt-qml) Hunter(researcher) Reed(session-manager) Melody(signal-processing) Drew(system-designer) Tessa(testing-strategy) Parker(project-manager) Iris(ui-reviewer) Journey(ux-workflow).
 SCRIBE: SendMessage(to=Gale) with findings, metrics, wandb links, hypotheses, results — Gale maintains the session log AND curates shared context.'
 
 # Shared context summary (read-only snapshot of current team state, curated by Gale)
