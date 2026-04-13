@@ -3,11 +3,19 @@
 # Usage:
 #   record-decision "don't touch the auth module"
 #   echo "use pattern Y" | record-decision
-# Safe under concurrent sessions (directory-based lock).
+# Called by Reed via direct bash (not as a hook), so no stdin SID — falls
+# back to detect_project_key from cwd. Safe because Reed runs in the
+# parent session's cwd.
 set -euo pipefail
 
-# Only record when team is active
-ls .brains_in_a_hat/state/active.* &>/dev/null || { echo "record-decision: team not active" >&2; exit 1; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+source "${SCRIPT_DIR}/lib-common.sh"
+
+KEY=$(detect_project_key)
+SDIR=$(state_dir "$KEY")
+
+# Only record when team is active for this project
+ls "${SDIR}"/active.* &>/dev/null || { echo "record-decision: team not active" >&2; exit 1; }
 
 # Read decision text: prefer argv, fall back to stdin
 if [ $# -gt 0 ]; then
@@ -15,13 +23,12 @@ if [ $# -gt 0 ]; then
 else
   TEXT=$(cat)
 fi
-TEXT=$(echo "$TEXT" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')  # trim
+TEXT=$(echo "$TEXT" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
 [ -z "$TEXT" ] && { echo "record-decision: empty decision" >&2; exit 1; }
 
-STATE=".brains_in_a_hat/state/session-state.json"
+STATE="${SDIR}/session-state.json"
 LOCK="${STATE}.lock.d"
 
-# Acquire lock
 acquired=0
 for _ in 1 2 3 4 5; do
   if mkdir "$LOCK" 2>/dev/null; then acquired=1; break; fi
@@ -30,10 +37,8 @@ done
 [ "$acquired" = "1" ] || { echo "record-decision: couldn't acquire lock" >&2; exit 1; }
 trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
 
-# Initialize state file if absent
 [ -f "$STATE" ] || echo '{"spawned_agents":[],"decisions":[],"last_updated":""}' > "$STATE"
 
-# Append decision with timestamp
 jq --arg text "$TEXT" --arg ts "$(date -Iseconds)" \
   '.decisions += [{ts:$ts, text:$text}] | .last_updated = $ts' \
   "$STATE" > "${STATE}.tmp.$$" && mv "${STATE}.tmp.$$" "$STATE"

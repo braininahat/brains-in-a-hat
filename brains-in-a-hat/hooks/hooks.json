@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/first-prompt-greeting\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/first-prompt-greeting\""
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd\" session-start 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd\" session-start"
           }
         ]
       }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{ if ls .brains_in_a_hat/state/active.* &>/dev/null; then INPUT=$(cat); SID=$(echo \"$INPUT\" | jq -r '.session_id // empty' 2>/dev/null); [ -n \"$SID\" ] && echo final > \".brains_in_a_hat/state/retro-pending.${SID}\"; cp .brains_in_a_hat/state/session-state.json .brains_in_a_hat/state/session-end-snapshot.json 2>/dev/null || true; printf '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionEnd\",\"additionalContext\":\"Session ending. Spawn ALL THREE in parallel, fire-and-exit (do NOT wait): (1) SendMessage(to=Gale) to finalize session chapter and compile PDF. (2) Agent(subagent_type=\\\"brains-in-a-hat:meta-retro\\\", name=\\\"Mira\\\", model=\\\"sonnet\\\", run_in_background=true, prompt=\\\"mode=final. Read session-state.json, activity.jsonl, and the session-log in vault. Write the session retro with CODEOWNERS/patterns/workflow maintenance. Report a one-line receipt.\\\"). (3) Agent(subagent_type=\\\"brains-in-a-hat:session-manager\\\", name=\\\"Reed\\\", model=\\\"sonnet\\\", run_in_background=true, prompt=\\\"mode=persist. Promote session-state.json.decisions to vault as decisions/<slug>.md. Update user-preferences.json. Do NOT write a retro \\u2014 that is Mira\\u2019s job. Report a one-line receipt.\\\"). Exit after firing all three.\"}}'; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inline-session-end\""
           }
         ]
       }
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{ INPUT=$(cat); SID=$(echo \"$INPUT\" | jq -r '.session_id // empty' 2>/dev/null); mkdir -p .brains_in_a_hat/state; if [ -n \"$SID\" ]; then touch \".brains_in_a_hat/state/compact-pending.${SID}\"; echo checkpoint > \".brains_in_a_hat/state/retro-pending.${SID}\"; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inline-precompact\""
           }
         ]
       }
@@ -50,15 +50,15 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{ if ls .brains_in_a_hat/state/active.* &>/dev/null; then INPUT=$(cat); AGENT=$(echo \"$INPUT\" | jq -r '.agent_type // \"agent\"'); SESSION=$(ls -t .brains_in_a_hat/state/active.* 2>/dev/null | head -1); SESSION=\"${SESSION##*/active.}\"; jq -nc --arg ts \"$(date -Iseconds)\" --arg agent \"$AGENT\" --arg session \"$SESSION\" '{ts:$ts,agent:$agent,session:$session,event:\"start\",detail:\"spawned\"}' >> .brains_in_a_hat/state/activity.jsonl 2>/dev/null; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inline-subagent-start-activity\""
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inject-subagent-context\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inject-subagent-context\""
           },
           {
             "type": "command",
-            "command": "{ INPUT=$(cat); ID=$(echo \"$INPUT\" | jq -r '.agent_id // .agent_type // empty' 2>/dev/null); mkdir -p .brains_in_a_hat/state; [ -n \"$ID\" ] && touch \".brains_in_a_hat/state/in-subagent.${ID}\"; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inline-subagent-start-marker\""
           }
         ]
       }
@@ -69,11 +69,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{ if ls .brains_in_a_hat/state/active.* &>/dev/null; then INPUT=$(cat); AGENT=$(echo \"$INPUT\" | jq -r '.agent_type // \"agent\"'); SESSION=$(ls -t .brains_in_a_hat/state/active.* 2>/dev/null | head -1); SESSION=\"${SESSION##*/active.}\"; jq -nc --arg ts \"$(date -Iseconds)\" --arg agent \"$AGENT\" --arg session \"$SESSION\" '{ts:$ts,agent:$agent,session:$session,event:\"done\",detail:\"completed\"}' >> .brains_in_a_hat/state/activity.jsonl 2>/dev/null; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inline-subagent-stop-activity\""
           },
           {
             "type": "command",
-            "command": "{ INPUT=$(cat); ID=$(echo \"$INPUT\" | jq -r '.agent_id // .agent_type // empty' 2>/dev/null); [ -n \"$ID\" ] && rm -f \".brains_in_a_hat/state/in-subagent.${ID}\"; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inline-subagent-stop-marker\""
           }
         ]
       }
@@ -84,15 +84,15 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{ if ls .brains_in_a_hat/state/active.* &>/dev/null; then mkdir -p .brains_in_a_hat/state; INPUT=$(cat); AGENT=$(echo \"$INPUT\" | jq -r '.tool_input.name // .tool_input.subagent_type // \"agent\"'); DESC=$(echo \"$INPUT\" | jq -r '.tool_input.description // \"\"'); SESSION=$(ls -t .brains_in_a_hat/state/active.* 2>/dev/null | head -1); SESSION=\"${SESSION##*/active.}\"; jq -nc --arg ts \"$(date -Iseconds)\" --arg agent \"$AGENT\" --arg detail \"$DESC\" --arg session \"$SESSION\" '{ts:$ts,agent:$agent,session:$session,event:\"spawn\",detail:$detail}' >> .brains_in_a_hat/state/activity.jsonl; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inline-posttool-agent-activity\""
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/update-session-state\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/update-session-state\""
           },
           {
             "type": "command",
-            "command": "{ if ls .brains_in_a_hat/state/active.* &>/dev/null; then INPUT=$(cat); AGENT=$(echo \"$INPUT\" | jq -r '.tool_input.name // .tool_input.subagent_type // \"agent\"' 2>/dev/null); case \"$AGENT\" in Gale|brains-in-a-hat:scribe) exit 0 ;; esac; printf '{\"hookSpecificOutput\":{\"additionalContext\":\"SCRIBE: Agent %s just completed. SendMessage Gale with a summary of findings, decisions, metrics, or concepts worth logging. Gale will update the session log, create wiki entries, and curate shared context in session-state.json.\"}}' \"$AGENT\"; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inline-posttool-agent-scribe\""
           }
         ]
       },
@@ -101,7 +101,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{ if ls .brains_in_a_hat/state/active.* &>/dev/null; then printf '{\"hookSpecificOutput\":{\"additionalContext\":\"SCRIBE: Entered plan mode. SendMessage Gale with the planning context \\u2014 what problem is being solved, constraints, and research questions. Gale will log under Research Questions / Methods.\"}}'; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inline-posttool-enter-plan\""
           }
         ]
       },
@@ -110,7 +110,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{ if ls .brains_in_a_hat/state/active.* &>/dev/null; then printf '{\"hookSpecificOutput\":{\"additionalContext\":\"SCRIBE: Exited plan mode. SendMessage Gale with the finalized plan, key decisions, and architecture choices. Gale will log under Decisions & Notes / Architecture.\"}}'; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inline-posttool-exit-plan\""
           }
         ]
       }
@@ -121,7 +121,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/enforce-neal-allowlist\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/enforce-neal-allowlist\""
           }
         ]
       },
@@ -130,7 +130,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{ INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r '.tool_input.file_path // empty'); PLUGIN_ROOT=\"${CLAUDE_PLUGIN_ROOT:-__unset__}\"; if [ \"$PLUGIN_ROOT\" != \"__unset__\" ] && echo \"$FILE\" | grep -qF \"$PLUGIN_ROOT\"; then echo '{\"decision\":\"block\",\"reason\":\"Cannot modify plugin files from within an agent.\"}'; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inline-pretool-write-plugin-guard\""
           }
         ]
       },
@@ -139,7 +139,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/pretool-agent-check\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/pretool-agent-check\""
           }
         ]
       }

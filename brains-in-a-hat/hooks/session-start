@@ -3,12 +3,11 @@
 # session-start — SessionStart hook for the brains-in-a-hat plugin
 #
 # Purpose:
-#   Bootstrap-only. Creates directory structure, migrates old state,
-#   cleans stale markers, and — if Claude Code is starting from a
-#   compaction event — writes the compact-pending marker so
-#   first-prompt-greeting will emit the recovery banner on the next
-#   user prompt. Does NOT inject persona or gather context — that's
-#   handled by /assemble when the user opts in.
+#   Bootstrap-only. Computes the project KEY from cwd, writes the SID→key
+#   lookup, creates per-key state and global vault dirs, cleans stale
+#   markers, and (if the session source is compaction) writes the
+#   compact-pending marker so first-prompt-greeting will emit the recovery
+#   banner. Does NOT inject persona or gather context — that's /assemble.
 #
 # Outputs: empty (no persona injection)
 
@@ -16,26 +15,28 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-VAULT_DIR="${HOME}/.brains_in_a_hat/vault"
-STATE_DIR=".brains_in_a_hat/state"
-PROJECT_CONFIG=".brains_in_a_hat"
-
-# ── Shared helpers ────────────────────────────────────────────────────
+PROJECT_CONFIG=".brains_in_a_hat"   # in-tree, committable only
 
 source "${SCRIPT_DIR}/lib-common.sh"
+
+# Self-redirect stderr to bootstrap log (key not yet known)
+LOGFILE="${BIH_HOME}/state/_bootstrap.log"
+mkdir -p "$(dirname "$LOGFILE")" 2>/dev/null || true
+exec 2>> "$LOGFILE"
 
 # ── Directory bootstrap ──────────────────────────────────────────────
 
 bootstrap_dirs() {
-  # Flat Obsidian-native vault — all notes at root, properties for categorization
-  mkdir -p "${VAULT_DIR}"
-  mkdir -p "${VAULT_DIR}/attachments"
+  local key="$1"
+  local sdir vdir
+  sdir=$(state_dir "${key}")
+  vdir="${VAULT_DIR}"
 
-  # Project-local plugin dirs
+  mkdir -p "${VAULT_DIR}" "${VAULT_DIR}/attachments" "${SESSIONS_DIR}" "${sdir}"
+
+  # In-tree committable config (NOT state — state is now under sdir)
   mkdir -p "${PROJECT_CONFIG}"
-  mkdir -p "${STATE_DIR}"
 
-  # CODEOWNERS (project-local, committable)
   if [ ! -f "${PROJECT_CONFIG}/CODEOWNERS" ]; then
     cat > "${PROJECT_CONFIG}/CODEOWNERS" << 'CODEOWNERS'
 # brains-in-a-hat agent ownership mappings
@@ -59,14 +60,14 @@ tests/               testing-strategy
 CODEOWNERS
   fi
 
-  # .gitignore for runtime state
   if [ ! -f "${PROJECT_CONFIG}/.gitignore" ]; then
     cat > "${PROJECT_CONFIG}/.gitignore" << 'GITIGNORE'
+# State moved to ~/.brains_in_a_hat/state/<KEY>/ in v0.7+
+# Anything still under state/ here is a pre-migration leftover.
 state/
 GITIGNORE
   fi
 
-  # Obsidian config
   if [ ! -d "${VAULT_DIR}/.obsidian" ]; then
     mkdir -p "${VAULT_DIR}/.obsidian"
     cat > "${VAULT_DIR}/.obsidian/app.json" << 'OBSIDIAN'
@@ -80,102 +81,172 @@ OBSIDIAN
   fi
 }
 
-# ── Migrate old state from .claude/team/ ─────────────────────────────
+# ── Migrate ancient .claude/team/ layout (very old plugin versions) ──
 
 migrate_old_state() {
+  local sdir="$1"
   local old_dir=".claude/team"
   [ -d "${old_dir}" ] || return 0
 
-  # Migrate committable config
   [ -f "${old_dir}/CODEOWNERS" ] && [ ! -f "${PROJECT_CONFIG}/CODEOWNERS" ] && \
-    mv "${old_dir}/CODEOWNERS" "${PROJECT_CONFIG}/CODEOWNERS"
+    mv "${old_dir}/CODEOWNERS" "${PROJECT_CONFIG}/CODEOWNERS" 2>/dev/null || true
   [ -f "${old_dir}/domain-config.json" ] && [ ! -f "${PROJECT_CONFIG}/domain-config.json" ] && \
-    mv "${old_dir}/domain-config.json" "${PROJECT_CONFIG}/domain-config.json"
+    mv "${old_dir}/domain-config.json" "${PROJECT_CONFIG}/domain-config.json" 2>/dev/null || true
 
-  # Migrate runtime state
   for f in activity.jsonl pm-tier; do
-    [ -f "${old_dir}/${f}" ] && mv "${old_dir}/${f}" "${STATE_DIR}/${f}" 2>/dev/null || true
+    [ -f "${old_dir}/${f}" ] && mv "${old_dir}/${f}" "${sdir}/${f}" 2>/dev/null || true
   done
 
-  # Clean up old dir if empty
   rmdir "${old_dir}" 2>/dev/null || true
+}
+
+# ── Legacy in-tree state detection (informational) ───────────────────
+
+detect_legacy_state() {
+  [ -d ".brains_in_a_hat/state" ] || return 0
+  if [ -n "$(ls -A .brains_in_a_hat/state 2>/dev/null)" ]; then
+    echo "[brains-in-a-hat] Legacy in-tree .brains_in_a_hat/state/ detected — delete it; state now lives at ~/.brains_in_a_hat/state/<KEY>/." >&2
+  fi
+}
+
+# ── Cleanup stale markers in this session's state dir ────────────────
+# All markers are now keyed by SID (Claude Code session UUID), not PID.
+# Any marker whose SID doesn't match the current one is stale.
+
+cleanup_state_dir() {
+  local sdir="$1" sid="$2"
+  local marker prefix
+
+  for prefix in active cwd missing-shown skills-cache-built gather-context-emitted post-mortem-emitted compact-pending; do
+    for marker in "${sdir}/${prefix}".*; do
+      [ -f "$marker" ] || continue
+      [ "${marker##*/${prefix}.}" = "$sid" ] || rm -f "$marker"
+    done
+  done
+
+  # in-subagent markers — no subagent can be running at session start
+  rm -f "${sdir}"/in-subagent.* 2>/dev/null || true
+
+  # Stale lock dirs (safety net — process holding the lock is gone)
+  rmdir "${sdir}/session-state.json.lock.d" 2>/dev/null || true
+  rmdir "${sdir}/retro.lock.d" 2>/dev/null || true
+
+  # Orphaned dashboard.log from older plugin versions
+  rm -f "${sdir}/dashboard.log" 2>/dev/null || true
+
+  # Only clear session state if no other session is active
+  if ! ls "${sdir}"/active.* &>/dev/null; then
+    rm -f "${sdir}/session-state.json"
+  fi
 }
 
 # ── Main ─────────────────────────────────────────────────────────────
 
 main() {
-  # Read hook input for source / session_id (used for compaction detection)
-  local INPUT SOURCE SID
+  local INPUT SOURCE SID KEY
   INPUT=$(cat)
   SOURCE=$(echo "$INPUT" | jq -r '.source // empty' 2>/dev/null) || SOURCE=""
   SID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SID=""
 
-  # Bootstrap directories
-  bootstrap_dirs
+  KEY=$(detect_project_key)
+  bootstrap_dirs "${KEY}"
 
-  # Migrate old state
-  migrate_old_state
+  local SDIR CWD_ROOT
+  SDIR=$(state_dir "${KEY}")
+  CWD_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+  CWD_ROOT=$(realpath "${CWD_ROOT}" 2>/dev/null || printf '%s' "${CWD_ROOT}")
 
-  # Clean up stale active flags (PIDs that no longer exist)
-  for pidfile in "${STATE_DIR}"/active.*; do
-    [ -f "$pidfile" ] || continue
-    local pid="${pidfile##*.}"
-    kill -0 "$pid" 2>/dev/null || rm -f "$pidfile"
-  done
-  # Clean up stale missing-skills markers (PID-keyed)
-  for marker in "${STATE_DIR}"/missing-shown.*; do
-    [ -f "$marker" ] || continue
-    local pid="${marker##*/missing-shown.}"
-    kill -0 "$pid" 2>/dev/null || rm -f "$marker"
-  done
-  # Clean up stale skills-cache-built markers (PID-keyed)
-  for marker in "${STATE_DIR}"/skills-cache-built.*; do
-    [ -f "$marker" ] || continue
-    local pid="${marker##*/skills-cache-built.}"
-    kill -0 "$pid" 2>/dev/null || rm -f "$marker"
-  done
-  # Clean up stale gather-context-emitted markers (PID-keyed)
-  for marker in "${STATE_DIR}"/gather-context-emitted.*; do
-    [ -f "$marker" ] || continue
-    local pid="${marker##*/gather-context-emitted.}"
-    kill -0 "$pid" 2>/dev/null || rm -f "$marker"
-  done
-  # Clean up stale compact-pending markers (keyed by session_id, not PID).
-  # Any marker not matching the current session_id is stale — drop it.
-  for marker in "${STATE_DIR}"/compact-pending.*; do
-    [ -f "$marker" ] || continue
-    [ "${marker##*/compact-pending.}" = "$SID" ] || rm -f "$marker"
-  done
-  # Clean up stale in-subagent markers (no PID linkage; safe to wipe at boot
-  # because no subagent can be running at session start)
-  rm -f "${STATE_DIR}"/in-subagent.* 2>/dev/null || true
-  # Clean up stale post-mortem-emitted markers (PID-keyed)
-  for marker in "${STATE_DIR}"/post-mortem-emitted.*; do
-    [ -f "$marker" ] || continue
-    local pid="${marker##*/post-mortem-emitted.}"
-    kill -0 "$pid" 2>/dev/null || rm -f "$marker"
-  done
-  # Clean up orphaned dashboard.log from older plugin versions (harmless if absent)
-  rm -f "${STATE_DIR}/dashboard.log" 2>/dev/null || true
-  # Clean up stale session-state lock (shouldn't persist — safety net)
-  rmdir "${STATE_DIR}/session-state.json.lock.d" 2>/dev/null || true
-  # Clean up stale retro lock (safety net — if Mira crashed mid-retro)
-  rmdir "${STATE_DIR}/retro.lock.d" 2>/dev/null || true
-  # Only clear session state if no other session is active
-  if ! ls "${STATE_DIR}"/active.* &>/dev/null; then
-    rm -f "${STATE_DIR}/session-state.json"
+  # From here on, log to per-key debug log
+  exec 2>> "${SDIR}/hook-debug.log"
+
+  # Write the SID → key lookup (the linchpin of every other hook)
+  # and the cwd marker (used by detect_project_key for worktree
+  # disambiguation on subsequent sessions).
+  if [ -n "${SID}" ]; then
+    local f="${SESSIONS_DIR}/${SID}.key"
+    printf '%s' "${KEY}" > "${f}.tmp.$$" && mv "${f}.tmp.$$" "${f}"
+    printf '%s' "${CWD_ROOT}" > "${SDIR}/cwd.${SID}"
   fi
+
+  # Cache team name for /assemble
+  team_name_for_key "${KEY}" > "${SDIR}/team-name"
+
+  detect_legacy_state
+  migrate_old_state "${SDIR}"
+  cleanup_state_dir "${SDIR}" "${SID}"
 
   # Belt + suspenders: if Claude Code is starting from a compaction event,
-  # write the compact-pending marker so first-prompt-greeting will emit the
-  # COMPACTION RECOVERY banner once on the next user prompt. Covers cases
-  # where the PreCompact hook may not have fired (e.g., auto-compact paths).
+  # write the compact-pending marker so first-prompt-greeting emits the
+  # COMPACTION RECOVERY banner on the next user prompt.
   if [ "$SOURCE" = "compact" ] && [ -n "$SID" ]; then
-    touch ".brains_in_a_hat/state/compact-pending.${SID}"
+    touch "${SDIR}/compact-pending.${SID}"
   fi
 
-  # No output — no persona injection.
-  # User activates team mode with /assemble.
+  # Append to global active-sessions.jsonl
+  if [ -n "${SID}" ]; then
+    local root name
+    root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+    name=$(detect_project_name)
+    jq -nc --arg ts "$(date -Iseconds)" \
+           --arg project "${root}" \
+           --arg key "${KEY}" \
+           --arg name "${name}" \
+           --arg sid "${SID}" \
+      '{ts:$ts,project:$project,key:$key,name:$name,session_id:$sid}' \
+      >> "${BIH_HOME}/active-sessions.jsonl" 2>/dev/null || true
+  fi
+
+  # ── Auto-activate + greet if this project has prior team state ────
+  # Detection: vault session log or index note exists for this KEY.
+  # When detected:
+  #   - write active.${SID} so all downstream hooks treat the team as active
+  #   - emit systemMessage: visible status line so the user sees Neal "greet"
+  #     immediately on session open
+  #   - emit additionalContext: instructs Claude (Neal) to open with a full
+  #     greeting on the first user prompt, regardless of what the user types
+  local SESSION_LOG="${VAULT_DIR}/${KEY}--session-log.md"
+  local INDEX_NOTE="${VAULT_DIR}/${KEY}--index.md"
+  if [ -f "$SESSION_LOG" ] || [ -f "$INDEX_NOTE" ]; then
+    echo "active" > "${SDIR}/active.${SID}"
+
+    local project_name branch dirty_count focus team_name
+    project_name=$(detect_project_name)
+    branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "no-git")
+    dirty_count=$(git status --short 2>/dev/null | wc -l | tr -d ' ')
+    focus=""
+    if [ -f "${SDIR}/session-state.json" ]; then
+      focus=$(jq -r '.current_focus // ""' "${SDIR}/session-state.json" 2>/dev/null || echo "")
+    fi
+    team_name=$(cat "${SDIR}/team-name" 2>/dev/null || team_name_for_key "${KEY}")
+
+    local greeting
+    if [ -n "$focus" ]; then
+      greeting="🎩 Neal here — back on ${project_name} (${branch}, ${dirty_count} dirty). Last focus: ${focus}. What's up?"
+    else
+      greeting="🎩 Neal here — back on ${project_name} (${branch}, ${dirty_count} dirty). What's up?"
+    fi
+
+    local additional_ctx
+    additional_ctx=$(cat <<EOF
+AUTO-GREET: brains-in-a-hat team is active for project '${KEY}' (team_name: ${team_name}).
+Read \$CLAUDE_PLUGIN_ROOT/hooks/neal-persona.md fully and adopt the Neal persona NOW.
+
+On your very first response — regardless of what the user types — open with a brief status
+greeting covering: project name, branch, dirty file count, last focus from session-state.json,
+any pending retros or post-mortems. Then address the user's actual prompt. Example opening:
+
+  "Neal here. Back on ${project_name} (${branch}, ${dirty_count} dirty). ${focus:+Last focus: ${focus}. }<continue addressing their prompt>..."
+
+Do NOT ask "how can I help" — assume continuation of prior work. Do NOT re-run /assemble —
+the team is already active for this session.
+EOF
+)
+
+    jq -nc \
+      --arg sm "$greeting" \
+      --arg ctx "$additional_ctx" \
+      '{systemMessage:$sm, hookSpecificOutput:{hookEventName:"SessionStart", additionalContext:$ctx}}'
+  fi
 }
 
 main

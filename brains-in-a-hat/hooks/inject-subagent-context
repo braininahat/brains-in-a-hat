@@ -4,41 +4,60 @@
 # - SHARED CONTEXT: live snapshot of session-state.json (current_focus, active_tasks,
 #   recent findings, open_questions, warnings) — curated by Gale (scribe.md).
 # - SUFFIX: per-agent RECOMMENDED SKILLS + inline fallbacks, read from agent-ctx.cache.
+#
+# All paths in the PROTOCOLS string are pre-resolved to absolute paths so spawned
+# subagents can use them verbatim — they don't have access to .session_id and
+# can't resolve the key themselves.
 set -euo pipefail
 
-ls .brains_in_a_hat/state/active.* &>/dev/null || exit 0
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+source "${SCRIPT_DIR}/lib-common.sh"
+
+LOGFILE="${BIH_HOME}/state/_bootstrap.log"
+mkdir -p "$(dirname "$LOGFILE")" 2>/dev/null || true
+exec 2>> "$LOGFILE"
 
 INPUT=$(cat)
+SID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SID=""
+[ -n "$SID" ] || exit 0
+KEY=$(read_session_key "$SID")
+[ -n "$KEY" ] || exit 0
+SDIR=$(state_dir "$KEY")
+exec 2>> "${SDIR}/hook-debug.log"
+
+ls "${SDIR}"/active.* &>/dev/null || exit 0
+
 AGENT_TYPE=$(echo "$INPUT" | jq -r '.agent_type // empty' 2>/dev/null) || AGENT_TYPE=""
 AGENT_TYPE="${AGENT_TYPE#brains-in-a-hat:}"
 
 # Refresh caches if stale (idempotent, no-op when fresh)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-bash "${SCRIPT_DIR}/refresh-skills-cache" 2>/dev/null || true
+KEY_ENV="${KEY}" bash "${SCRIPT_DIR}/refresh-skills-cache" 2>/dev/null || true
 
 # Lookup precomputed suffix for this agent type
 SUFFIX=""
-CTX_CACHE=".brains_in_a_hat/state/agent-ctx.cache"
+CTX_CACHE="${SDIR}/agent-ctx.cache"
 if [ -f "$CTX_CACHE" ] && [ -n "$AGENT_TYPE" ]; then
   SUFFIX=$(jq -r --arg t "$AGENT_TYPE" '.[$t] // ""' "$CTX_CACHE" 2>/dev/null) || SUFFIX=""
 fi
 
-PROTOCOLS='PROTOCOLS:
-LOG: .brains_in_a_hat/state/activity.jsonl (events: start/read/finding/message/done, 3-6/task)
+PROTOCOLS="PROTOCOLS:
+KEY: ${KEY}
+SDIR: ${SDIR}
+LOG: ${SDIR}/activity.jsonl (events: start/read/finding/message/done, 3-6/task)
 NAV: Prefer LSP over Grep for Python.
 COMM: Report to Neal via SendMessage. May message teammates by name. Never talk to user directly.
 TASKS: Check TaskList for assignments. TaskUpdate to claim/complete.
 IDLE: No work? Stay silent — do not announce yourself.
 DOMAIN: Read .brains_in_a_hat/domain-config.json if it exists.
-VAULT: Persist artifacts to ~/.brains_in_a_hat/vault/ using $CLAUDE_PLUGIN_ROOT/vault-templates/. Flat structure — all notes at root, categorized by type: and project: frontmatter (retro/decision/research/architecture/qa-review/wiki) + [[wikilinks]]. Images go in attachments/.
-WIKI: Reference-repo explorations -> ~/.brains_in_a_hat/vault/<slug>.md (template: wiki.md, type: wiki).
+VAULT: Persist artifacts to ${VAULT_DIR}/ with filename convention \`${KEY}--<category>[-<slug>].md\` (e.g., \`${KEY}--session-log.md\`, \`${KEY}--wiki-<topic>.md\`). Categorize via type: and project: frontmatter (retro/decision/research/architecture/qa-review/wiki). After every vault write, refresh the per-project index by running: \`source \$CLAUDE_PLUGIN_ROOT/hooks/lib-common.sh && ensure_vault_index ${KEY}\`. Images go in ${VAULT_DIR}/attachments/.
+WIKI: Reference-repo explorations -> ${VAULT_DIR}/${KEY}--wiki-<slug>.md (template: wiki.md, type: wiki).
 PRIOR ART: Before research/design/review, check vault index from session context. Build on existing notes.
 TEAMMATES: Need help? SendMessage(to=Neal) with expertise needed. Roster: Gale(scribe) Mason(architect) Tabitha(data-schema) Porter(devops) Paige(docs-writer) Sage(domain-expert) Sterling(hardware-device) Mira(meta-retro) Nolan(mlops) Cooper(packaging) Blaze(profiler) Chase(qa-engineer) Quinn(qt-qml) Hunter(researcher) Reed(session-manager) Melody(signal-processing) Drew(system-designer) Tessa(testing-strategy) Parker(project-manager) Iris(ui-reviewer) Journey(ux-workflow).
-SCRIBE: SendMessage(to=Gale) with findings, metrics, wandb links, hypotheses, results — Gale maintains the session log AND curates shared context.'
+SCRIBE: SendMessage(to=Gale) with findings, metrics, wandb links, hypotheses, results — Gale maintains the session log AND curates shared context."
 
 # Shared context summary (read-only snapshot of current team state, curated by Gale)
 SHARED=""
-STATE=".brains_in_a_hat/state/session-state.json"
+STATE="${SDIR}/session-state.json"
 if [ -f "$STATE" ]; then
   SHARED=$(jq -r '
     (if (.current_focus // "") != "" then "- focus: " + .current_focus + "\n" else "" end) +

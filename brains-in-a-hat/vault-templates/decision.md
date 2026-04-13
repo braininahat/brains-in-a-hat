@@ -1,12 +1,20 @@
 ---
 type: decision
 write-path: "~/.brains_in_a_hat/vault/"
-project: "{{project}}"
+project: "{{key}}"
 agents: []
 date: "{{date}}"
 tags: [decision]
 status: active
 ---
+
+<!--
+Filename convention: <KEY>--decision-<slug>.md at vault root.
+After writing:
+  source "$CLAUDE_PLUGIN_ROOT/hooks/lib-common.sh"
+  ensure_vault_index "$KEY"
+-->
+
 # Decision: {{title}}
 
 ## Context

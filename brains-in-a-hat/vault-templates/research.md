@@ -1,12 +1,20 @@
 ---
 type: research
 write-path: "~/.brains_in_a_hat/vault/"
-project: "{{project}}"
+project: "{{key}}"
 agents: [researcher]
 date: "{{date}}"
 tags: [research]
 status: active
 ---
+
+<!--
+Filename convention: <KEY>--research-<topic-slug>.md at vault root.
+After writing:
+  source "$CLAUDE_PLUGIN_ROOT/hooks/lib-common.sh"
+  ensure_vault_index "$KEY"
+-->
+
 # Research: {{topic}}
 
 ## Question
