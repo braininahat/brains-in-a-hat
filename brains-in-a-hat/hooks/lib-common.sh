@@ -5,7 +5,9 @@
 # Source this file from other hook scripts:
 #   source "$(dirname "${BASH_SOURCE[0]}")/lib-common.sh"
 
-VAULT_DIR="${VAULT_DIR:-${HOME}/.brains_in_a_hat/vault}"
+# BRAINS_VAULT_DIR: user-facing env var to point vault at any location (e.g. Obsidian Sync folder).
+# Unset → default ~/.brains_in_a_hat/vault. Takes precedence over any VAULT_DIR already in env.
+VAULT_DIR="${BRAINS_VAULT_DIR:-${VAULT_DIR:-${HOME}/.brains_in_a_hat/vault}}"
 
 # ── Project detection ─────────────────────────────────────────────────
 

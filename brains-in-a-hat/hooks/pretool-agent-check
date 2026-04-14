@@ -13,7 +13,7 @@ PROMPT=$(echo "$INPUT" | jq -r '.tool_input.prompt // empty' 2>/dev/null) || exi
 MODEL=$(echo "$INPUT" | jq -r '.tool_input.model // empty' 2>/dev/null) || true
 DESC=$(echo "$INPUT" | jq -r '.tool_input.description // empty' 2>/dev/null) || true
 
-VAULT_DIR="${HOME}/.brains_in_a_hat/vault"
+VAULT_DIR="${BRAINS_VAULT_DIR:-${HOME}/.brains_in_a_hat/vault}"
 PROJECT=$(gh repo view --json name -q '.name' 2>/dev/null || basename "$(pwd)")
 
 # ── Vault Check (project-scoped + global wiki) ──────────────────────

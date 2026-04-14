@@ -9,7 +9,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-VAULT_DIR="${HOME}/.brains_in_a_hat/vault"
+VAULT_DIR="${BRAINS_VAULT_DIR:-${HOME}/.brains_in_a_hat/vault}"
 STATE_DIR=".brains_in_a_hat/state"
 
 # ── Shared helpers ────────────────────────────────────────────────────
@@ -258,7 +258,7 @@ build_context() {
   local context=""
   context+="## Project: ${project_name}\n"
   context+="PM tier: ${pm_tier}\n"
-  context+="Vault: ~/.brains_in_a_hat/vault/ (project: ${project_name})\n\n"
+  context+="Vault: ${VAULT_DIR}/ (project: ${project_name})\n\n"
 
   context+="## Git State\n$(gather_git_data)\n\n"
   context+="## Backlog (${pm_tier})\n$(gather_issues "${pm_tier}")\n\n"
