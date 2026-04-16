@@ -1,7 +1,7 @@
 {
   "name": "brains-in-a-hat",
   "description": "21 named specialist agents with Neal as chief of staff, agent teams coordination, vault persistence, and session scribe",
-  "version": "0.6.43",
+  "version": "0.6.44",
   "author": {
     "name": "braininahat"
   },
