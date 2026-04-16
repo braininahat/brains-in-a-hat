@@ -13,7 +13,7 @@ PROMPT=$(echo "$INPUT" | jq -r '.tool_input.prompt // empty' 2>/dev/null) || exi
 MODEL=$(echo "$INPUT" | jq -r '.tool_input.model // empty' 2>/dev/null) || true
 DESC=$(echo "$INPUT" | jq -r '.tool_input.description // empty' 2>/dev/null) || true
 
-VAULT_DIR="${HOME}/.brains_in_a_hat/vault"
+VAULT_DIR="${BRAINS_VAULT_DIR:-${HOME}/.brains_in_a_hat/vault}"
 PROJECT=$(gh repo view --json name -q '.name' 2>/dev/null || basename "$(pwd)")
 
 # ── Vault Check (project-scoped + global wiki) ──────────────────────
@@ -150,7 +150,7 @@ sonnet_ceiling() {
   case "${MODEL:-}" in
     opus*)
       echo "$PROMPT" | grep -qF '[opus-justified]' && return 0
-      jq -nc --arg r "Opus ceiling: team members run haiku (default) or sonnet. Add [opus-justified] to the spawn prompt to escalate to opus for factually demanding tasks." '{decision:"block",reason:$r}'
+      jq -nc --arg r "Opus ceiling: team members run haiku (default) or sonnet. Add [opus-justified] to the spawn prompt to escalate to opus for factually demanding tasks." '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny"},systemMessage:$r}'
       exit 0
       ;;
   esac

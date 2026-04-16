@@ -14,7 +14,7 @@ CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null) || true
 # Deny clearly destructive patterns regardless of team mode
 if [ -n "$CMD" ]; then
   if echo "$CMD" | grep -qiE 'rm[[:space:]]+-rf[[:space:]]+/|DROP[[:space:]]+(TABLE|DATABASE)|mkfs|format[[:space:]]+(c:|/dev/)'; then
-    jq -nc '{hookSpecificOutput:{hookEventName:"PermissionRequest",decision:{behavior:"deny",message:"Destructive command blocked by team safety hook. Coordinate with Neal before proceeding."}}}'
+    jq -nc '{hookSpecificOutput:{hookEventName:"PermissionRequest",decision:{behavior:"deny",message:"Destructive command blocked by team safety hook. Coordinate with Neal before proceeding.",interrupt:true}}}'
     exit 0
   fi
 fi

@@ -16,7 +16,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-VAULT_DIR="${HOME}/.brains_in_a_hat/vault"
+VAULT_DIR="${BRAINS_VAULT_DIR:-${HOME}/.brains_in_a_hat/vault}"
 STATE_DIR=".brains_in_a_hat/state"
 PROJECT_CONFIG=".brains_in_a_hat"
 

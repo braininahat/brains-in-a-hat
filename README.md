@@ -96,6 +96,19 @@ Copy `examples/domain-config.json` to `.brains_in_a_hat/domain-config.json` and 
 
 The plugin lives in a Git repo — install on any device with Claude Code. Project-specific config (CODEOWNERS, domain-config) stays in `.brains_in_a_hat/`. Vault artifacts persist globally at `~/.brains_in_a_hat/vault/`.
 
+## Custom Vault Location (Obsidian Sync or any path)
+
+Set `BRAINS_VAULT_DIR` in your environment to redirect the vault to any location — for example, a subfolder inside an Obsidian Sync vault so artifacts are automatically synced across devices:
+
+```zsh
+# ~/.zshenv  (use .zshenv not .zshrc — hooks run in non-interactive shells)
+export BRAINS_VAULT_DIR="$HOME/Documents/Second Brain/brainshat"
+```
+
+The directory is created automatically on first run. All agents, vault lookups (`vault_find`), and artifact writes use the resolved path. The `/assemble` briefing shows the active vault location.
+
+If unset, defaults to `~/.brains_in_a_hat/vault/`.
+
 ## License
 
 MIT
