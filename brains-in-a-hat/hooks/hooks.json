@@ -1,16 +1,5 @@
 {
   "hooks": {
-    "PermissionRequest": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/handle-permission-request\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
-          }
-        ]
-      }
-    ],
     "UserPromptSubmit": [
       {
         "matcher": "",
@@ -141,7 +130,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{ INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r '.tool_input.file_path // empty'); PLUGIN_ROOT=\"${CLAUDE_PLUGIN_ROOT:-__unset__}\"; if [ \"$PLUGIN_ROOT\" != \"__unset__\" ] && echo \"$FILE\" | grep -qF \"$PLUGIN_ROOT\"; then echo '{\"decision\":\"block\",\"reason\":\"Cannot modify plugin files from within an agent.\"}'; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "{ INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r '.tool_input.file_path // empty'); PLUGIN_ROOT=\"${CLAUDE_PLUGIN_ROOT:-__unset__}\"; if [ \"$PLUGIN_ROOT\" != \"__unset__\" ] && echo \"$FILE\" | grep -qF \"$PLUGIN_ROOT\"; then jq -nc '{hookSpecificOutput:{hookEventName:\"PreToolUse\",permissionDecision:\"deny\"},systemMessage:\"Cannot modify plugin files from within an agent.\"}'; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       },
