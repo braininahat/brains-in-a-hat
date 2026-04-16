@@ -150,7 +150,7 @@ sonnet_ceiling() {
   case "${MODEL:-}" in
     opus*)
       echo "$PROMPT" | grep -qF '[opus-justified]' && return 0
-      jq -nc --arg r "Opus ceiling: team members run haiku (default) or sonnet. Add [opus-justified] to the spawn prompt to escalate to opus for factually demanding tasks." '{decision:"block",reason:$r}'
+      jq -nc --arg r "Opus ceiling: team members run haiku (default) or sonnet. Add [opus-justified] to the spawn prompt to escalate to opus for factually demanding tasks." '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny"},systemMessage:$r}'
       exit 0
       ;;
   esac
