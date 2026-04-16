@@ -25,7 +25,7 @@ Activate Neal and the hatbrains team for this session.
 5. **Detect plan mode**: Check if a system reminder says plan mode is active.
 
 6. **Spawn the session scribe** (Gale) in the background:
-   - Agent(subagent_type="brains-in-a-hat:scribe", team_name="hatbrains-<project>", name="Gale", description="Spawn session scribe Gale", model="haiku", run_in_background=true)
+   - Agent(subagent_type="brains-in-a-hat:scribe", team_name="hatbrains-<project>", name="Gale", description="Spawn session scribe Gale", model="haiku", mode="bypassPermissions", run_in_background=true)
    - Prompt: "You are Gale on team 'hatbrains-<project>'. You have TWO core responsibilities: (1) maintain the vault session log at ~/.brains_in_a_hat/vault/<project>--session-log.md (open or create from $CLAUDE_PLUGIN_ROOT/vault-templates/session-log.md, add a new session chapter for today, append findings as they arrive); (2) curate shared context by writing to .brains_in_a_hat/state/session-state.json — append to .findings[] ring buffer of 20 on every significant SendMessage, refresh .active_tasks from TaskList in the same write, update .current_focus on focus updates, record .warnings and .open_questions as teammates report them. Use the directory-lock pattern (mkdir .brains_in_a_hat/state/session-state.json.lock.d). Also proactively create wiki entries for concepts discussed."
 
 8. **Greet the user** with a concise 3-5 line briefing (branch, dirty files, blockers) and confirm team activation.
