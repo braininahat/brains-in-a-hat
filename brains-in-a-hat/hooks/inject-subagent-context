@@ -28,7 +28,7 @@ fi
 PROTOCOLS='PROTOCOLS:
 LOG: .brains_in_a_hat/state/activity.jsonl (events: start/read/finding/message/done, 3-6/task)
 NAV: Prefer LSP over Grep for Python.
-COMM: Report to team-lead via SendMessage. May message teammates by name. Never talk to user directly.
+COMM: SendMessage is your ONLY channel to team-lead and teammates. Plain text output is invisible to everyone — nothing is read unless sent via SendMessage(to=team-lead|<Name>|Gale). Never assume free-text output will be seen. Never talk to user directly.
 TASKS: Check TaskList for assignments. TaskUpdate to claim/complete.
 IDLE: No work? Stay silent — do not announce yourself.
 DOMAIN: Read .brains_in_a_hat/domain-config.json if it exists.
