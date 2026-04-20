@@ -1,9 +1,9 @@
 {
   "name": "minion",
-  "version": "1.0.29",
-  "description": "Opus plans, Devstral executes. Auto-spawns local LLM with optimal config.",
+  "version": "2.0.2",
+  "description": "Opus plans and reviews. Qwen CLI drafts code. Structured-prompt delegation via `qwen -p` headless — no MCP server, no llama-server autospawn.",
   "author": { "name": "braininahat" },
   "repository": "https://github.com/braininahat/brains-in-a-hat",
   "license": "MIT",
-  "keywords": ["delegation", "devstral", "local-llm", "minion"]
+  "keywords": ["delegation", "qwen", "qwen-code", "local-llm", "minion", "cli-delegation"]
 }

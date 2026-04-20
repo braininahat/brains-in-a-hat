@@ -1,1 +1,16 @@
-{"hooks":{"PreToolUse":[{"matcher":"Write|Edit|NotebookEdit|Bash","hooks":[{"type":"command","command":"bash \"${CLAUDE_PLUGIN_ROOT}/hooks/devstral-advisor\"","timeout":5}]},{"matcher":"EnterPlanMode","hooks":[{"type":"command","command":"bash \"${CLAUDE_PLUGIN_ROOT}/hooks/devstral-model-switch\" Q4_K_M","timeout":10}]},{"matcher":"ExitPlanMode","hooks":[{"type":"command","command":"bash \"${CLAUDE_PLUGIN_ROOT}/hooks/devstral-model-switch\" IQ4_NL","timeout":10}]}]}}
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/qwen-advisor\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
