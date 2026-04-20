@@ -1,45 +1,73 @@
 # minion Plugin
 
-**Opus plans and reviews. Devstral generates code.**
+**Opus plans and reviews. Qwen CLI drafts code.**
 
-This plugin wires a local Devstral 24B model into your Claude Code workflow as a code-generation minion. Opus (you) retains architectural judgment and code review. Devstral handles implementation throughput.
+This plugin wires a structured delegation workflow around the `qwen-code` CLI in headless mode. Opus (you) retains architectural judgement and code review. Qwen handles implementation drafting.
+
+No MCP server, no llama-server autospawn, no tool-level integration. Just `qwen -p` invoked via Bash, with structured prompts and a review gate before anything lands on disk.
 
 ## Activation
 
-Run `/minion:delegate` to activate the delegation workflow. This sets an active flag and primes the workflow described below.
+Run `/minion:delegate` to activate the delegation workflow. This sets an active flag so the advisory hook fires on Write/Edit/Bash calls targeting source files. See `skills/delegate/SKILL.md` for the full workflow.
 
 ## Prompt flow
 
-1. Opus reads the codebase and designs the approach
-2. Opus crafts a precise, scoped prompt for each implementation task
-3. Opus calls `ask_devstral_agent` with the prompt and project cwd
-4. Devstral explores the codebase (read-only: read_file, grep, glob_files, ls) and returns implementation
-5. Opus reviews the output for correctness, style, and completeness
-6. Opus applies the result using Write/Edit tools
+1. Opus decides whether a task is delegation-appropriate (see SKILL.md decision table).
+2. Opus builds a structured prompt with explicit requirements, anti-requirements, test cases, and output format.
+3. Opus invokes `scripts/qwen-delegate.sh <persona>` via the Bash tool, passing the structured prompt on stdin.
+4. The wrapper runs `qwen -p` headless with the persona's system prompt appended, `-o json` for parseable output, and optionally read-only tools via `--allow-read`.
+5. The wrapper extracts `.result` from the JSON and returns it on stdout.
+6. Opus reviews the output against the requirements checklist (see SKILL.md) and applies it with Write/Edit — or discards and re-delegates.
 
-Devstral never acts autonomously — it only responds to prompts crafted by Opus.
+Qwen never writes to the filesystem directly. It never gets `--yolo`. It never gets write/edit/shell tools.
 
-## MCP tools
+## Personas
 
-- `ask_devstral(prompt, system?, max_tokens?)` — one-shot stateless query
-- `ask_devstral_agent(prompt, cwd?, system?, persona?, max_tokens?, max_iterations?)` — agentic loop with read-only codebase tools
-- `ensure_server()` — checks if llama-server is healthy on localhost:8000; auto-spawns with optimal config if not running
+Persona files at `personas/*.md` are appended to qwen's system prompt via `--append-system-prompt`. They are NOT Claude Code subagent definitions — they're text templates injected into qwen's context.
 
-## Auto-spawn
+- `coder` → code generation with self-check against caller's requirements.
+- `analyst` → review/analysis with evidence-only claims and no hedging.
 
-The `ensure_server` tool spawns llama-server (ik_llama.cpp) with pinned config:
-- **Plan mode**: Devstral Q4_K_M + Q8 KV + 96K context + hadamard
-- **Execution mode**: Devstral IQ4_NL + Q8 KV + 96K context + hadamard
+## Structured-prompt template (non-negotiable)
 
-Quant switches automatically via mode-transition hooks writing `~/.minion/state/quant_preference`.
+Qwen follows what you explicitly ask and nothing more. Benchmark-tested: tone reframes (`"you are a senior engineer, self-review"`) do not close the quality gap to Sonnet. Explicit numbered requirements do.
 
-Call `ensure_server` before the first `ask_devstral_agent` call if you're unsure whether the server is running.
+Every delegated prompt must have the TASK / REQUIREMENTS / ANTI-REQUIREMENTS / TESTS / OUTPUT FORMAT structure. If you can't fill every section, the task is probably too open-ended for delegation — stay in Opus.
+
+See `skills/delegate/SKILL.md` for the full template and invocation patterns.
+
+## Backend
+
+Qwen expects an OpenAI-compatible endpoint. User configures this in `~/.qwen/settings.json`. Typically a local llama.cpp server started via the `llama-qwen` zshrc alias on `http://localhost:8000/v1`. If the backend is down, tell the user to start it — the plugin does NOT autospawn.
 
 ## Hook behavior
 
-When the minion is active, a PreToolUse advisory hook fires on Write/Edit/NotebookEdit/Bash tool calls that target source code files (.py, .ts, .js, .rs, .go, .cpp, etc.). The hook never blocks — it suggests using `ask_devstral_agent` as an alternative. You can ignore the suggestion and proceed.
+When the minion is active, `hooks/qwen-advisor` fires on Write/Edit/NotebookEdit/Bash calls that target source files. Advisory only — never blocks. The message suggests drafting via `scripts/qwen-delegate.sh` first.
 
-## Agent personas
+## Files
 
-- `devstral-coder` — code generation: reads before writing, no placeholders, output only
-- `devstral-analyst` — codebase analysis: file:line refs, structured findings, no speculation
+```
+minion/
+├── .claude-plugin/plugin.json   # plugin manifest (v2.0.0)
+├── CLAUDE.md                    # this file
+├── hooks/
+│   ├── hooks.json               # PreToolUse → qwen-advisor (only)
+│   ├── lib.sh                   # activate / deactivate / is_active
+│   └── qwen-advisor             # advisory hook for source-file writes
+├── personas/
+│   ├── coder.md                 # injected via --append-system-prompt
+│   └── analyst.md
+├── scripts/
+│   └── qwen-delegate.sh         # the thin wrapper
+└── skills/
+    └── delegate/SKILL.md        # the workflow
+```
+
+## What's gone (v1.x → v2.0)
+
+- `mcp/devstral-mcp.py` and `.mcp.json` — MCP server approach replaced by direct CLI invocation.
+- `server/` — llama-server lifecycle manager (autoconfig, manager). User owns their server via zshrc aliases.
+- `hooks/devstral-model-switch` — quant-switching on plan-mode transitions. Qwen manages its own backend.
+- `agents/devstral-*.md` → renamed to `personas/` (not Claude Code subagents, just persona templates).
+
+Migration: any caller using `ask_devstral_agent` or `ask_devstral` MCP tools must switch to `bash "${CLAUDE_PLUGIN_ROOT}/scripts/qwen-delegate.sh" <persona>` as documented in the skill.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# devstral-advisor: advisory hook — suggests ask_devstral_agent for source files.
+# qwen-advisor: advisory hook — suggests delegating source-file writes via qwen CLI.
 # Never blocks. Only fires when minion is active.
 # Input: JSON on stdin with tool_name and tool_input fields.
 
@@ -43,7 +43,7 @@ case "$tool_name" in
 esac
 
 if [[ "$should_advise" == "1" ]]; then
-    echo '{"hookSpecificOutput":{"additionalContext":"Minion is active. Consider delegating this code generation task to Devstral via ask_devstral_agent — it can read the codebase and produce the implementation. You can still proceed directly if preferred."}}'
+    echo '{"hookSpecificOutput":{"additionalContext":"Minion is active. Consider drafting this with qwen first — run `bash ${CLAUDE_PLUGIN_ROOT}/scripts/qwen-delegate.sh coder <<requirements-list-prompt>>`, review the output, then apply. See skills/delegate/SKILL.md for the structured-prompt template. You can still write directly if preferred."}}'
 fi
 
 exit 0
