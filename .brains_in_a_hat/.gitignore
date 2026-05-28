@@ -1,1 +1,7 @@
+# Ephemeral runtime state — recreated each session, never committed.
 state/
+*.log
+
+# project.json IS tracked (repo-committed project keying); ensure it's never
+# accidentally ignored if a glob above gets generalized later.
+!project.json
