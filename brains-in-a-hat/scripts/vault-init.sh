@@ -101,30 +101,31 @@ case "$CMD" in
     (
       cd "$path"
       git init -q
-      mkdir -p _solo
+      mkdir -p attachments
       if [ ! -f README.md ]; then
         cat > README.md <<'README'
 # brains-in-a-hat vault
 
 Personal external memory for the brains-in-a-hat Claude Code plugin.
 
-## Layout
+## Layout — flat, no directories
+
+All notes at vault root (plus `attachments/` for images). Discovery is
+frontmatter-driven; structure is virtual via Dataview queries in `index.md`.
 
 ```
 <vault>/
-├── index.md                       # top-level dashboard (auto-maintained)
-├── <projectGroup>/
-│   ├── index.md
-│   ├── <repoKey>--learnings.md
-│   ├── shared--learnings.md
-│   ├── session-log.md
-│   ├── decisions/<slug>.md
-│   └── wiki/<concept>.md
-└── _solo/                         # ungrouped repos
+├── index.md                                # top-level dashboard
+├── <repoKey>--learnings.md                 # per-repo learnings
+├── <projectGroup>--shared--learnings.md    # cross-repo learnings
+├── <projectGroup>--session-log.md          # chronological session log
+├── <descriptor>--decision.md               # one file per decision
+├── <concept>.md                            # wiki entries
+└── attachments/                            # images, plots, etc.
 ```
 
 Every file uses YAML frontmatter (`type`, `projectGroup`, `repoKey`, `date`,
-`status`, `tags`, `related`) — Dataview-queryable in Obsidian.
+`status`, `tags`, `related`, `superproject`) — Dataview-queryable in Obsidian.
 
 ## Sync
 
