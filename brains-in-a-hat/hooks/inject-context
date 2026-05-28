@@ -25,10 +25,6 @@ source "${SCRIPT_DIR}/lib-common.sh"
 INPUT=$(cat)
 TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null) || TRANSCRIPT=""
 
-# Bail if new roster isn't opted in for this repo
-new_roster=$(_project_json_get newRoster)
-[ "$new_roster" = "true" ] || exit 0
-
 # How many recent transcript turns to slice (configurable later)
 TURNS_TO_INJECT=${BRAINS_TRANSCRIPT_TURNS:-20}
 

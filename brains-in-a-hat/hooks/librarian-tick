@@ -34,14 +34,10 @@ AGENT_NAME=$(echo "$INPUT" | jq -r '.agent_name // empty' 2>/dev/null) || AGENT_
 TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null) || TRANSCRIPT=""
 SID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SID=""
 
-# Bail 1: not Librarian → exit 0 (let teammate idle normally)
+# Bail: not Librarian → exit 0 (let teammate idle normally)
 [ "$AGENT_NAME" = "Librarian" ] || exit 0
 
-# Bail 2: newRoster flag not set in this repo → exit 0
-new_roster=$(_project_json_get newRoster)
-[ "$new_roster" = "true" ] || exit 0
-
-# Bail 3: no transcript path → can't process
+# Bail: no transcript path → can't process
 [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] || exit 0
 
 CURSOR_FILE=".brains_in_a_hat/state/librarian-cursor.${SID}"

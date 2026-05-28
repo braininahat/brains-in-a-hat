@@ -26,21 +26,33 @@ source "${SCRIPT_DIR}/lib-common.sh"
 INPUT=$(cat)
 SID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SID=""
 
-# Bail 1: no session id (can't gate)
+# Bail: no session id
 [ -n "$SID" ] || exit 0
 
-# Bail 2: newRoster not set
-new_roster=$(_project_json_get newRoster)
-[ "$new_roster" = "true" ] || exit 0
-
-# Bail 3: already bootstrapped this session
-MARKER=".brains_in_a_hat/state/new-roster-bootstrapped.${SID}"
-[ -f "$MARKER" ] && exit 0
-
 mkdir -p .brains_in_a_hat/state
+
+# Check for a pending compaction recovery (set by PreCompact hook). If set,
+# we still emit the bootstrap block — but with extra compaction-recovery
+# instructions appended.
+COMPACT_RECOVERING=false
+for m in .brains_in_a_hat/state/compact-pending.*; do
+  [ -f "$m" ] || continue
+  if [ "${m##*/compact-pending.}" = "$SID" ]; then
+    COMPACT_RECOVERING=true
+    rm -f "$m"
+    break
+  fi
+done
+
+# Bail: already bootstrapped this session (unless we just detected a
+# compaction event, which is reason to re-emit the orientation).
+MARKER=".brains_in_a_hat/state/new-roster-bootstrapped.${SID}"
+if [ -f "$MARKER" ] && [ "$COMPACT_RECOVERING" = "false" ]; then
+  exit 0
+fi
 touch "$MARKER"
 
-# Set active marker so other hooks know team is active (compat with existing flow)
+# Set active marker so other hooks know team is active
 echo "active" > ".brains_in_a_hat/state/active.${SID}"
 
 REPO_KEY=$(derive_project_key)
@@ -78,6 +90,12 @@ Vault state: \$BRAINS_VAULT_DIR (must be a git repo). projectGroup=${PROJECT_GRO
 
 When you reply to the user, briefly acknowledge the new roster is online. Don't list all four teammates — that's noise. Just proceed with the user's request.
 EOF
+
+if [ "$COMPACT_RECOVERING" = "true" ]; then
+  INSTRUCTION="${INSTRUCTION}
+
+COMPACTION RECOVERY: this session just resumed after a compaction. Your spawned teammates (Librarian) and any in-flight work may have been compressed away. Re-spawn Librarian per the block above. Ask Librarian for the latest <repoKey>--learnings.md and the most recent entries in <projectGroup>--session-log.md to re-orient."
+fi
 
 jq -nc --arg ctx "$INSTRUCTION" \
   '{hookSpecificOutput:{hookEventName:"UserPromptSubmit",additionalContext:$ctx}}'

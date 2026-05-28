@@ -1,181 +1,59 @@
 #!/usr/bin/env bash
 #
-# session-start — SessionStart hook for the brains-in-a-hat plugin
+# session-start — SessionStart hook for brains-in-a-hat (v1.0.0-alpha onward)
 #
-# Purpose:
-#   Bootstrap-only. Creates directory structure, migrates old state,
-#   cleans stale markers, and — if Claude Code is starting from a
-#   compaction event — writes the compact-pending marker so
-#   first-prompt-greeting will emit the recovery banner on the next
-#   user prompt. Does NOT inject persona or gather context — that's
-#   handled by /assemble when the user opts in.
+# Minimal:
+#   - Bootstrap .brains_in_a_hat/state/ directory.
+#   - Clean stale per-session markers from previous sessions.
+#   - On compact-source sessions, write compact-pending marker so the next
+#     UserPromptSubmit can emit a recovery hint via new-roster-bootstrap.
 #
-# Outputs: empty (no persona injection)
+# Does NOT inject persona, gather context, create CODEOWNERS, set up
+# vault-templates, or migrate legacy state. The new roster handles
+# orientation via new-roster-bootstrap on the first user prompt; the vault
+# is the user's own private git repo set up via scripts/vault-init.sh.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-VAULT_DIR="${BRAINS_VAULT_DIR:-${HOME}/.brains_in_a_hat/vault}"
-STATE_DIR=".brains_in_a_hat/state"
-PROJECT_CONFIG=".brains_in_a_hat"
-
-# ── Shared helpers ────────────────────────────────────────────────────
-
 source "${SCRIPT_DIR}/lib-common.sh"
 
-# ── Directory bootstrap ──────────────────────────────────────────────
+STATE_DIR=".brains_in_a_hat/state"
 
-bootstrap_dirs() {
-  # Flat Obsidian-native vault — all notes at root, properties for categorization
-  mkdir -p "${VAULT_DIR}"
-  mkdir -p "${VAULT_DIR}/attachments"
+INPUT=$(cat)
+SOURCE=$(echo "$INPUT" | jq -r '.source // empty' 2>/dev/null) || SOURCE=""
+SID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SID=""
 
-  # Project-local plugin dirs
-  mkdir -p "${PROJECT_CONFIG}"
-  mkdir -p "${STATE_DIR}"
+mkdir -p "$STATE_DIR"
 
-  # CODEOWNERS (project-local, committable)
-  if [ ! -f "${PROJECT_CONFIG}/CODEOWNERS" ]; then
-    cat > "${PROJECT_CONFIG}/CODEOWNERS" << 'CODEOWNERS'
-# brains-in-a-hat agent ownership mappings
-# Format: <glob-pattern>  <agent-name>
-# meta-retro updates this file during retrospectives.
-
-*.qml                qt-qml
-*.py                 architect
-*.sql                data-schema
-*.yml                devops
-*.yaml               devops
-*.json               data-schema
-Dockerfile           packaging
-*.spec               packaging
-*.AppImage           packaging
-*.md                 docs-writer
-*.ts                 architect
-*.tsx                architect
-tests/               testing-strategy
-.github/             devops
-CODEOWNERS
+# Clean per-session markers that aren't ours (stale from previous runs).
+# Pattern: <name>.<SID> where SID is encoded in filename.
+for marker in "$STATE_DIR"/active.* \
+              "$STATE_DIR"/new-roster-bootstrapped.* \
+              "$STATE_DIR"/in-subagent.* \
+              "$STATE_DIR"/librarian-cursor.*; do
+  [ -f "$marker" ] || continue
+  marker_sid="${marker##*.}"
+  if [ "$marker_sid" != "$SID" ]; then
+    # Don't reap active.<SID> from another concurrent live session; check pid liveness.
+    if [[ "$marker" == */active.* ]]; then
+      kill -0 "$marker_sid" 2>/dev/null || rm -f "$marker"
+    else
+      rm -f "$marker"
+    fi
   fi
+done
 
-  # .gitignore for runtime state
-  if [ ! -f "${PROJECT_CONFIG}/.gitignore" ]; then
-    cat > "${PROJECT_CONFIG}/.gitignore" << 'GITIGNORE'
-state/
-GITIGNORE
-  fi
+# Stale compact-pending markers from other sessions
+for marker in "$STATE_DIR"/compact-pending.*; do
+  [ -f "$marker" ] || continue
+  [ "${marker##*/compact-pending.}" = "$SID" ] || rm -f "$marker"
+done
 
-  # Obsidian config
-  if [ ! -d "${VAULT_DIR}/.obsidian" ]; then
-    mkdir -p "${VAULT_DIR}/.obsidian"
-    cat > "${VAULT_DIR}/.obsidian/app.json" << 'OBSIDIAN'
-{
-  "promptDelete": false,
-  "alwaysUpdateLinks": true,
-  "newLinkFormat": "relative",
-  "attachmentFolderPath": "attachments"
-}
-OBSIDIAN
-  fi
-}
+# If we're resuming from a compaction, mark this session for recovery
+if [ "$SOURCE" = "compact" ] && [ -n "$SID" ]; then
+  touch "${STATE_DIR}/compact-pending.${SID}"
+fi
 
-# ── Migrate old state from .claude/team/ ─────────────────────────────
-
-migrate_old_state() {
-  local old_dir=".claude/team"
-  [ -d "${old_dir}" ] || return 0
-
-  # Migrate committable config
-  [ -f "${old_dir}/CODEOWNERS" ] && [ ! -f "${PROJECT_CONFIG}/CODEOWNERS" ] && \
-    mv "${old_dir}/CODEOWNERS" "${PROJECT_CONFIG}/CODEOWNERS"
-  [ -f "${old_dir}/domain-config.json" ] && [ ! -f "${PROJECT_CONFIG}/domain-config.json" ] && \
-    mv "${old_dir}/domain-config.json" "${PROJECT_CONFIG}/domain-config.json"
-
-  # Migrate runtime state
-  for f in activity.jsonl pm-tier; do
-    [ -f "${old_dir}/${f}" ] && mv "${old_dir}/${f}" "${STATE_DIR}/${f}" 2>/dev/null || true
-  done
-
-  # Clean up old dir if empty
-  rmdir "${old_dir}" 2>/dev/null || true
-}
-
-# ── Main ─────────────────────────────────────────────────────────────
-
-main() {
-  # Read hook input for source / session_id (used for compaction detection)
-  local INPUT SOURCE SID
-  INPUT=$(cat)
-  SOURCE=$(echo "$INPUT" | jq -r '.source // empty' 2>/dev/null) || SOURCE=""
-  SID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SID=""
-
-  # Bootstrap directories
-  bootstrap_dirs
-
-  # Migrate old state
-  migrate_old_state
-
-  # Clean up stale active flags (PIDs that no longer exist)
-  for pidfile in "${STATE_DIR}"/active.*; do
-    [ -f "$pidfile" ] || continue
-    local pid="${pidfile##*.}"
-    kill -0 "$pid" 2>/dev/null || rm -f "$pidfile"
-  done
-  # Clean up stale missing-skills markers (PID-keyed)
-  for marker in "${STATE_DIR}"/missing-shown.*; do
-    [ -f "$marker" ] || continue
-    local pid="${marker##*/missing-shown.}"
-    kill -0 "$pid" 2>/dev/null || rm -f "$marker"
-  done
-  # Clean up stale skills-cache-built markers (PID-keyed)
-  for marker in "${STATE_DIR}"/skills-cache-built.*; do
-    [ -f "$marker" ] || continue
-    local pid="${marker##*/skills-cache-built.}"
-    kill -0 "$pid" 2>/dev/null || rm -f "$marker"
-  done
-  # Clean up stale gather-context-emitted markers (PID-keyed)
-  for marker in "${STATE_DIR}"/gather-context-emitted.*; do
-    [ -f "$marker" ] || continue
-    local pid="${marker##*/gather-context-emitted.}"
-    kill -0 "$pid" 2>/dev/null || rm -f "$marker"
-  done
-  # Clean up stale compact-pending markers (keyed by session_id, not PID).
-  # Any marker not matching the current session_id is stale — drop it.
-  for marker in "${STATE_DIR}"/compact-pending.*; do
-    [ -f "$marker" ] || continue
-    [ "${marker##*/compact-pending.}" = "$SID" ] || rm -f "$marker"
-  done
-  # Clean up stale in-subagent markers (no PID linkage; safe to wipe at boot
-  # because no subagent can be running at session start)
-  rm -f "${STATE_DIR}"/in-subagent.* 2>/dev/null || true
-  # Clean up stale post-mortem-emitted markers (PID-keyed)
-  for marker in "${STATE_DIR}"/post-mortem-emitted.*; do
-    [ -f "$marker" ] || continue
-    local pid="${marker##*/post-mortem-emitted.}"
-    kill -0 "$pid" 2>/dev/null || rm -f "$marker"
-  done
-  # Clean up orphaned dashboard.log from older plugin versions (harmless if absent)
-  rm -f "${STATE_DIR}/dashboard.log" 2>/dev/null || true
-  # Clean up stale session-state lock (shouldn't persist — safety net)
-  rmdir "${STATE_DIR}/session-state.json.lock.d" 2>/dev/null || true
-  # Clean up stale retro lock (safety net — if Mira crashed mid-retro)
-  rmdir "${STATE_DIR}/retro.lock.d" 2>/dev/null || true
-  # Only clear session state if no other session is active
-  if ! ls "${STATE_DIR}"/active.* &>/dev/null; then
-    rm -f "${STATE_DIR}/session-state.json"
-  fi
-
-  # Belt + suspenders: if Claude Code is starting from a compaction event,
-  # write the compact-pending marker so first-prompt-greeting will emit the
-  # COMPACTION RECOVERY banner once on the next user prompt. Covers cases
-  # where the PreCompact hook may not have fired (e.g., auto-compact paths).
-  if [ "$SOURCE" = "compact" ] && [ -n "$SID" ]; then
-    touch ".brains_in_a_hat/state/compact-pending.${SID}"
-  fi
-
-  # No output — no persona injection.
-  # User activates team mode with /assemble.
-}
-
-main
+# No output — the new-roster-bootstrap hook handles orientation on the
+# first user prompt of the session.
