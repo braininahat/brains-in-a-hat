@@ -138,4 +138,31 @@ fi
 # 2. Always sync marketplace.json from each plugin's plugin.json
 sync_marketplace
 
+# 3. README drift guard: refuse the commit if README.md's "What's inside" table
+#    counts don't match the actual file counts in brains-in-a-hat/.
+#    Looks for lines matching "| Agents | <N> |" / "| Commands | <N> |".
+README="${REPO_ROOT}/README.md"
+PLUGIN_DIR="${REPO_ROOT}/brains-in-a-hat"
+if [ -f "$README" ] && [ -d "$PLUGIN_DIR/agents" ]; then
+  agents_actual=$(find "$PLUGIN_DIR/agents" -maxdepth 1 -name '*.md' -type f | wc -l | tr -d ' ')
+  commands_actual=$(find "$PLUGIN_DIR/commands" -maxdepth 1 -name '*.md' -type f 2>/dev/null | wc -l | tr -d ' ')
+
+  agents_readme=$(grep -oE '^\| Agents \| [0-9]+' "$README" | grep -oE '[0-9]+' | head -1 || true)
+  commands_readme=$(grep -oE '^\| Commands \| [0-9]+' "$README" | grep -oE '[0-9]+' | head -1 || true)
+
+  drift=0
+  if [ -n "$agents_readme" ] && [ "$agents_readme" != "$agents_actual" ]; then
+    echo "README drift: claims $agents_readme agents, repo has $agents_actual." >&2
+    drift=1
+  fi
+  if [ -n "$commands_readme" ] && [ "$commands_readme" != "$commands_actual" ]; then
+    echo "README drift: claims $commands_readme commands, repo has $commands_actual." >&2
+    drift=1
+  fi
+  if [ $drift -eq 1 ]; then
+    echo "Refusing the commit. Update README.md's \"What's inside\" table to match, or set SKIP_README_DRIFT=1 to bypass." >&2
+    [ "${SKIP_README_DRIFT:-0}" = "1" ] || exit 1
+  fi
+fi
+
 exit 0

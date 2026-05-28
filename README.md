@@ -1,114 +1,97 @@
 # brains-in-a-hat
 
-A 20-agent AI software team for Claude Code. Smart routing, auto-CODEOWNERS, self-improvement, and proactive DX suggestions.
+**5-agent Claude Code team with closed-loop self-improvement, Obsidian-synced external memory, multi-repo project constellations.**
 
-## Install
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.32%2B-orange)](https://code.claude.com)
+[![version](https://img.shields.io/badge/version-1.0.0--alpha-blue)](./brains-in-a-hat/.claude-plugin/plugin.json)
+[![Experimental agent teams](https://img.shields.io/badge/agent%20teams-experimental-yellow)](https://code.claude.com/docs/en/agent-teams)
+[![License](https://img.shields.io/badge/license-MIT-green)](#license)
 
 ```bash
-# Install the team plugin
-claude plugins add /path/to/brains-in-a-hat/brains-in-a-hat
-
-# Install the visualization plugin (optional)
-claude plugins add /path/to/brains-in-a-hat/grant
+claude plugins add github:braininahat/brains-in-a-hat
 ```
 
-## Plugins
+## Quick start
 
-| Plugin | Purpose |
-|--------|---------|
-| `brains-in-a-hat` | 20-agent dev team — routing, QA, memory, retrospectives |
-| `grant` | Visualization agent — architecture diagrams, git activity, code maps |
+```bash
+# 1. Install the plugin
+claude plugins add github:braininahat/brains-in-a-hat
 
-## Team Roster
+# 2. Bootstrap your vault (one-time, per device)
+bash brains-in-a-hat/scripts/vault-init.sh auto
 
-### Always Active
-| Agent | Role |
-|-------|------|
-| Session Manager | Briefings at session start, memory updates at end |
-| QA Engineer | Advisory QA reviews before commits |
-| Meta/Retro | Retrospectives, DX suggestions, CODEOWNERS maintenance |
+# 3. Set the env var (add to your shell rc to persist)
+export BRAINS_VAULT_DIR=~/.hatbrains
 
-### Routed by Task Type
-| Agent | Trigger |
-|-------|---------|
-| System Designer | New features, architectural decisions |
-| Architect | Code review for boundary violations |
-| UI Reviewer | QML/CSS/HTML visual changes |
-| Qt/QML | PySide6/Qt-specific patterns |
-| MLOps | ONNX models, inference, weights |
-| Signal Processing | Audio/video pipelines, timestamps |
-| Hardware/Device | Probe protocol, WiFi, USB, V4L2 |
-| Domain Expert | Clinical/domain-specific validation |
-| Profiler | Performance, latency, memory |
-| Researcher | Technical investigation, benchmarks |
-| Data/Schema | SQLite, migrations, config |
-| UX/Workflow | End-to-end user flows |
-| Testing Strategy | Test suite design, coverage |
+# 4. (Optional) Group a multi-repo project — drop this in each repo:
+cat > .brains_in_a_hat/project.json <<EOF
+{
+  "projectGroup": "pulse",
+  "repoKey": "pulse-model"
+}
+EOF
 
-### Periodic/On-Demand
-| Agent | Role |
-|-------|------|
-| DevOps | CI/CD, GitHub Actions |
-| Packaging | AppImage, Docker, PyInstaller |
-| Docs Writer | Specs, CLAUDE.md, API docs |
-| Parker | Issues, backlog, milestones, GitHub Projects |
-
-## Features
-
-- **Smart routing** — Neal (orchestrator) activates 4-6 agents per task based on files touched
-- **Auto-CODEOWNERS** — Meta Agent generates ownership mapping on install, maintains during retros
-- **Self-improvement** — retrospectives after major tasks, agent prompt updates
-- **Proactive DX** — suggests hooks, aliases, workflow improvements (rate-limited)
-- **Advisory QA** — QA reviews are advisory; they never block commits
-
-## Skills
-
-### brains-in-a-hat
-- `/assemble` — Activate the brains-in-a-hat team (Neal + all agents)
-- `/team-briefing` — Session start briefing: branch status, uncommitted changes, open tasks
-- `/team-debrief` — Session end memory update: save decisions, WIP, workflow changes
-- `/team-retro` — Post-task retrospective: what went well, what to improve
-- `/team-review` — QA review of staged/modified changes before commit
-- `/team-cleanup` — Find dead code, unused imports, stale TODOs
-
-### grant
-- `/grant` — Visualize architecture, git activity, code structure, or agent topology
-
-## Dashboard
-
-The dashboard auto-starts via the `session-start` hook each time a Claude Code session opens. It requires Python 3 or `uv` to be available on `$PATH`.
-
-- Runs at `http://localhost:8787` by default
-- Accepts a `?project=<path>` query parameter for multi-project use
-- Logs to `.brains_in_a_hat/state/dashboard.log` in the current project
-
-## Configuration
-
-### User Preferences
-
-Copy `examples/user-preferences.json` to `.brains_in_a_hat/user-preferences.json` in your project and customize. Controls communication style, tool preferences, engineering principles. The Meta Agent also learns and updates this file over time.
-
-### Domain Knowledge
-
-Copy `examples/domain-config.json` to `.brains_in_a_hat/domain-config.json` and customize for your domain. The included example is for clinical speech-language pathology — replace with your own domain terminology, compliance requirements, and validation rules.
-
-## Cross-Device / Cross-Account
-
-The plugin lives in a Git repo — install on any device with Claude Code. Project-specific config (CODEOWNERS, domain-config) stays in `.brains_in_a_hat/`. Vault artifacts persist globally at `~/.brains_in_a_hat/vault/`.
-
-## Custom Vault Location (Obsidian Sync or any path)
-
-Set `BRAINS_VAULT_DIR` in your environment to redirect the vault to any location — for example, a subfolder inside an Obsidian Sync vault so artifacts are automatically synced across devices:
-
-```zsh
-# ~/.zshenv  (use .zshenv not .zshrc — hooks run in non-interactive shells)
-export BRAINS_VAULT_DIR="$HOME/Documents/Second Brain/brainshat"
+# 5. Open Claude Code in the repo. The new-roster-bootstrap hook auto-spawns
+#    Librarian on your first prompt. That's it.
 ```
 
-The directory is created automatically on first run. All agents, vault lookups (`vault_find`), and artifact writes use the resolved path. The `/assemble` briefing shows the active vault location.
+## What's inside
 
-If unset, defaults to `~/.brains_in_a_hat/vault/`.
+| Component | Count | Description |
+|-----------|-------|-------------|
+| Agents | 4 | Librarian, Critic, Builder, Scout (plus Neal in the main thread) |
+| Commands | 2 | `/review` (Critic with lens param), `/ship` |
+| Hooks | 6 | session bootstrap + per-turn context injection + idle-tick + allowlist enforcement |
+| Scripts | 1 | `vault-init.sh` (detect/init/clone vault repo) |
+
+## How it works
+
+- **Neal** lives in the main thread and orchestrates. The user talks to Neal; Neal routes by intent (no CODEOWNERS, no file-pattern routing).
+- **Librarian** is an always-on teammate that curates a flat-vault knowledge graph in your private vault repo. It pulls/commits/pushes on every TeammateIdle tick — multi-device sync via git, no Obsidian sync required.
+- **Critic / Builder / Scout** spawn on demand. Critic switches review lenses by prompt parameter (`lens=architecture|security|performance|ux|correctness`); Builder reads project CLAUDE.md for domain context; Scout routes between context7, web, and own knowledge.
+- A `SubagentStart` hook injects the last N main-thread turns + active learnings into every teammate spawn, so you never have to manually push context.
+- A `TeammateIdle` hook re-engages Librarian to classify new transcript turns, update the vault with curation logic (update/supersede/delete — not just append), and push.
+
+## What makes it different
+
+- **Not 21 role-specialists with file-path routing** — 5 generalist teammates with intent-based dispatch.
+- **Not a write-only retro archive** — a curated vault that updates, supersedes, and deletes as you work.
+- **Not single-repo state** — project constellations that share context across all your repos.
+- **Not Obsidian-sync-dependent** — the vault is a git repo (e.g., a private GitHub repo); git is the sync primitive.
+- **Not a graph database server** — a flat-vault knowledge graph: markdown + YAML frontmatter + wikilinks + Dataview queries at read time. Zero infrastructure.
+
+## Multi-device & multi-repo
+
+The vault (`$BRAINS_VAULT_DIR`, default `~/.hatbrains`) is a private git repo. On a new device:
+
+```bash
+gh repo clone <you>/hatbrains-vault ~/.hatbrains
+export BRAINS_VAULT_DIR=~/.hatbrains
+```
+
+`vault-init.sh detect` (or `auto`) figures out which case you're in (fresh init vs clone existing).
+
+Worktrees of the same repo share the same vault entries (logical project keying via `.brains_in_a_hat/project.json` → git remote → basename, in that order).
+
+For multi-repo projects (e.g., PULSE = model + UI + paper), declare a shared `projectGroup` in each repo's `project.json`. Cross-repo learnings land in `<projectGroup>--shared--learnings.md`.
+
+## The vault, in one screenshot
+
+Open Obsidian to the vault root and you see one `index.md` with Dataview-driven sections: **Active now**, **This week**, **Open threads**, **Recent decisions**, **Wiki entries**, **Group rollup**. No subdirectories — the whole knowledge graph is a flat directory of markdown files. Cross-references are `[[wikilinks]]`; structure is frontmatter (`type`, `projectGroup`, `repoKey`, `tags`, `status`).
+
+## Documentation map
+
+- [`brains-in-a-hat/CLAUDE.md`](./brains-in-a-hat/CLAUDE.md) — architecture and hook lifecycle (source of truth for behavior)
+- [`brains-in-a-hat/agents/`](./brains-in-a-hat/agents/) — the four teammate persona files
+- [`brains-in-a-hat/hooks/neal-persona.md`](./brains-in-a-hat/hooks/neal-persona.md) — Neal's full prompt (orchestrator + meta-analyst)
+- [`brains-in-a-hat/scripts/vault-init.sh`](./brains-in-a-hat/scripts/vault-init.sh) — vault bootstrap helper
+
+## Recommended GitHub repo topics
+
+If you fork this, set these topics for discoverability:
+
+`claude-code`, `claude-code-plugin`, `claude-code-agents`, `agent-team`, `multi-agent`, `obsidian`, `obsidian-sync`, `ai-agents`, `agentic-ai`, `anthropic`, `self-improvement`, `external-memory`, `prompt-engineering`, `developer-tools`, `closed-loop-agents`.
 
 ## License
 
-MIT
+MIT.
