@@ -1,21 +1,38 @@
 #!/usr/bin/env bash
-# Auto-bump plugin versions on commit.
-# Patch bump (x.x.X) on regular commits, minor bump (x.X.0) on merges.
-# Skip with: SKIP_VERSION_BUMP=1 git commit ...
+# Auto-bump plugin versions on commit (per-plugin, only if changed) and keep
+# .claude-plugin/marketplace.json in sync with each plugin's plugin.json.
+#
+# Version bump rules:
+#   - Only plugins whose files appear in the staged diff get bumped.
+#   - Plugins with a prerelease tag in their version (contains '-') are locked
+#     and never auto-bumped. Update them manually when promoting (e.g.
+#     1.0.0-alpha -> 1.0.0-beta -> 1.0.0).
+#   - Merge commits do a minor bump; regular commits do a patch bump.
+#   - Skip all bumps with: SKIP_VERSION_BUMP=1 git commit ...
+#
+# Marketplace sync always runs (independent of SKIP_VERSION_BUMP), so the
+# version field in marketplace.json never drifts from the plugin.json.
 set -euo pipefail
 
-if [ "${SKIP_VERSION_BUMP:-0}" = "1" ]; then
-  exit 0
-fi
-
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+MARKETPLACE="${REPO_ROOT}/.claude-plugin/marketplace.json"
 
-# Determine bump type: merge → minor, regular → patch
+# Determine bump type: merge -> minor, regular -> patch
 if [ -f "${REPO_ROOT}/.git/MERGE_HEAD" ]; then
   BUMP="minor"
 else
   BUMP="patch"
 fi
+
+# Staged file list (relative to repo root)
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
+
+plugin_changed() {
+  local plugin_dir="$1"
+  # True if any staged file is inside this plugin's directory
+  echo "$STAGED" | grep -q "^${plugin_dir}/" && return 0
+  return 1
+}
 
 bump_version() {
   local file="$1"
@@ -23,6 +40,11 @@ bump_version() {
   version=$(grep -oP '"version"\s*:\s*"\K[^"]+' "$file")
 
   if [ -z "$version" ]; then
+    return
+  fi
+
+  # Lock prerelease versions (anything with a '-' suffix like 1.0.0-alpha)
+  if [[ "$version" == *-* ]]; then
     return
   fi
 
@@ -41,11 +63,79 @@ bump_version() {
   git add "$file"
 }
 
-# Find and bump all plugin.json files
-for plugin_json in "${REPO_ROOT}"/*/.claude-plugin/plugin.json; do
-  if [ -f "$plugin_json" ]; then
-    bump_version "$plugin_json"
+sync_marketplace() {
+  # Rewrite each plugin entry's version in marketplace.json to match its
+  # plugin.json. Uses jq if available, otherwise a sed fallback per plugin.
+  [ -f "$MARKETPLACE" ] || return 0
+
+  local changed=0
+  if command -v jq >/dev/null 2>&1; then
+    local tmp
+    tmp=$(mktemp)
+    cp "$MARKETPLACE" "$tmp"
+    local count
+    count=$(jq '.plugins | length' "$MARKETPLACE")
+    for i in $(seq 0 $((count - 1))); do
+      local name plugin_json source_path current_version target_version
+      name=$(jq -r ".plugins[$i].name" "$MARKETPLACE")
+      source_path=$(jq -r ".plugins[$i].source" "$MARKETPLACE")
+      plugin_json="${REPO_ROOT}/${source_path}/.claude-plugin/plugin.json"
+      [ -f "$plugin_json" ] || continue
+      target_version=$(grep -oP '"version"\s*:\s*"\K[^"]+' "$plugin_json")
+      current_version=$(jq -r ".plugins[$i].version" "$tmp")
+      if [ "$current_version" != "$target_version" ]; then
+        jq ".plugins[$i].version = \"$target_version\"" "$tmp" > "${tmp}.new" && mv "${tmp}.new" "$tmp"
+        changed=1
+      fi
+    done
+    if [ "$changed" -eq 1 ]; then
+      mv "$tmp" "$MARKETPLACE"
+      git add "$MARKETPLACE"
+    else
+      rm -f "$tmp"
+    fi
+  else
+    # jq not installed — fall back to per-plugin sed. Less robust but works
+    # for the simple version-only sync.
+    for plugin_json in "${REPO_ROOT}"/*/.claude-plugin/plugin.json; do
+      [ -f "$plugin_json" ] || continue
+      local plugin_dir name target_version
+      plugin_dir=$(dirname "$(dirname "$plugin_json")")
+      name=$(grep -oP '"name"\s*:\s*"\K[^"]+' "$plugin_json" | head -1)
+      target_version=$(grep -oP '"version"\s*:\s*"\K[^"]+' "$plugin_json")
+      # Update the version line in the marketplace entry block for this plugin
+      python3 - "$MARKETPLACE" "$name" "$target_version" <<'PY'
+import json, sys
+path, name, version = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(path) as f:
+    data = json.load(f)
+modified = False
+for p in data.get("plugins", []):
+    if p.get("name") == name and p.get("version") != version:
+        p["version"] = version
+        modified = True
+if modified:
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+PY
+    done
+    git add "$MARKETPLACE" 2>/dev/null || true
   fi
-done
+}
+
+# 1. Bump versions on changed, non-prerelease plugins (unless skipped)
+if [ "${SKIP_VERSION_BUMP:-0}" != "1" ]; then
+  for plugin_json in "${REPO_ROOT}"/*/.claude-plugin/plugin.json; do
+    [ -f "$plugin_json" ] || continue
+    plugin_dir=$(basename "$(dirname "$(dirname "$plugin_json")")")
+    if plugin_changed "$plugin_dir"; then
+      bump_version "$plugin_json"
+    fi
+  done
+fi
+
+# 2. Always sync marketplace.json from each plugin's plugin.json
+sync_marketplace
 
 exit 0
