@@ -1,6 +1,0 @@
-[1775587487] llama_init_from_gpt_params: setting dry_penalty_last_n to ctx_size = 65536
-[1775587487] warming up the model with an empty run
-[1775587529] Preserved token: 34
-[1775587529] Preserved token: 35
-[1775587529] Preserved token: 9
-[1775587529] Preserved token: 32
