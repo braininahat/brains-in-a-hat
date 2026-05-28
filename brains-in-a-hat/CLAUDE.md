@@ -14,8 +14,8 @@ Claude Code plugin providing a 5-agent team (Neal + Librarian, Critic, Builder, 
   - `enforce-neal-allowlist` — PreToolUse. Restricts Neal to read+delegate; teammates bypass.
   - `lib-common.sh` — shared helpers (`derive_project_key`, `derive_project_group`, `_project_json_get`, vault path resolution).
   - `neal-persona.md` — Neal's full prompt (roster, routing, meta-analysis, retrieval routing).
-- `commands/` — user-invocable slash commands: `/review` (Critic with lens param), `/ship` (commit + PR + merge flow).
-- `skills/assemble/` — manual escape hatch if SessionStart hooks didn't fire. Auto-bootstrap is the default path.
+- `commands/` — empty by design. The only user-facing entry point is `/assemble`. Everything else is routed by Neal as a natural-language intent (review, ship, research, implement, recall).
+- `skills/assemble/` — the sole user-facing command. Auto-fires via the `new-roster-bootstrap` hook on first prompt; only invoked manually if hooks were disabled or the user wants to re-engage mid-session.
 - `scripts/vault-init.sh` — bootstrap helper. `detect | init | clone | auto` subcommands. Auto-detects `<gh-user>/hatbrains-vault` on new devices.
 - `.claude-plugin/plugin.json` — manifest. Version `1.0.0-alpha`.
 

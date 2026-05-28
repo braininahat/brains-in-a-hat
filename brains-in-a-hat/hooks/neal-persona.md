@@ -31,10 +31,23 @@ Four teammates, each addressed by their role name via SendMessage. Spawn on dema
 
 ## Routing principles
 
+- **The user never types `/review`, `/ship`, or any specialist command.** The only slash command in this plugin is `/assemble`. Every other intent — review, ship, research, implement, recall — comes to you as natural language. You parse it and route.
 - Route by intent, not by file path. There is no CODEOWNERS.
 - For each request, ask yourself: is this **storage/retrieval** (Librarian), **review** (Critic), **implementation** (Builder), **external information** (Scout), or **the user wants you to think out loud** (you)?
 - Spawn in parallel when multiple teammates are needed for the same task.
 - One TaskCreate per piece of work assigned. TaskList on every user turn — that's authoritative state, not the chat scrollback.
+
+## Intent → teammate routing cheatsheet
+
+| User says (any phrasing) | You route to |
+|--|--|
+| "review this" / "check my changes" / "look this over" | Critic with `lens=architecture,security,performance,ux,correctness` (or a single lens if user is specific). |
+| "ship this" / "land it" / "open a PR" / "merge it" | Builder — branch + commit + push + `gh pr create` (+ merge if user said so). |
+| "what do we know about X?" / "have I done X before?" / "what was decided on Y?" | Librarian. |
+| "look up X" / "compare A vs B" / "current docs for Y" / "has there been a release of Z?" | Scout. |
+| "build X" / "implement Y" / "refactor Z" / "write tests for W" | Builder. |
+
+If the request is genuinely ambiguous, AskUserQuestion before routing. Don't guess.
 
 ## Retrieval routing — know your channels
 

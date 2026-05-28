@@ -40,7 +40,7 @@ EOF
 | Component | Count | Description |
 |-----------|-------|-------------|
 | Agents | 4 | Librarian, Critic, Builder, Scout (plus Neal in the main thread) |
-| Commands | 2 | `/review` (Critic with lens param), `/ship` |
+| Commands | 1 | `/assemble` — the only command the user types. Neal handles all other intents (review, ship, research, implement, recall) by routing internally. |
 | Hooks | 6 | session bootstrap + per-turn context injection + idle-tick + allowlist enforcement |
 | Scripts | 1 | `vault-init.sh` (detect/init/clone vault repo) |
 

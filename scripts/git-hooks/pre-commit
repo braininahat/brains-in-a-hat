@@ -145,7 +145,10 @@ README="${REPO_ROOT}/README.md"
 PLUGIN_DIR="${REPO_ROOT}/brains-in-a-hat"
 if [ -f "$README" ] && [ -d "$PLUGIN_DIR/agents" ]; then
   agents_actual=$(find "$PLUGIN_DIR/agents" -maxdepth 1 -name '*.md' -type f | wc -l | tr -d ' ')
-  commands_actual=$(find "$PLUGIN_DIR/commands" -maxdepth 1 -name '*.md' -type f 2>/dev/null | wc -l | tr -d ' ')
+  # User-invokable commands = anything slash-invokable: commands/*.md + skills/*/SKILL.md
+  cmd_files=$(find "$PLUGIN_DIR/commands" -maxdepth 1 -name '*.md' -type f 2>/dev/null | wc -l | tr -d ' ')
+  skill_files=$(find "$PLUGIN_DIR/skills" -maxdepth 2 -name 'SKILL.md' -type f 2>/dev/null | wc -l | tr -d ' ')
+  commands_actual=$((cmd_files + skill_files))
 
   agents_readme=$(grep -oE '^\| Agents \| [0-9]+' "$README" | grep -oE '[0-9]+' | head -1 || true)
   commands_readme=$(grep -oE '^\| Commands \| [0-9]+' "$README" | grep -oE '[0-9]+' | head -1 || true)
