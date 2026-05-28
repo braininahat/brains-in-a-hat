@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+#
+# new-roster-bootstrap — UserPromptSubmit hook for the new 5-agent roster.
+#
+# On the first prompt of a session where .brains_in_a_hat/project.json has
+# {"newRoster": true}, emit an additionalContext block instructing Neal to:
+#   1. TeamCreate hatbrains-<repoKey> (idempotent)
+#   2. Agent(subagent_type=brains-in-a-hat:librarian, name="Librarian",
+#            team_name=..., mode=bypassPermissions, run_in_background=true)
+#   3. Adopt the new-roster operating mode (route by intent, not CODEOWNERS;
+#      delegate to Critic/Builder/Scout on demand)
+#
+# After firing once per session, the hook writes
+# .brains_in_a_hat/state/new-roster-bootstrapped.<SID> and no-ops on
+# subsequent prompts.
+#
+# Bails (no-op) when:
+#   - newRoster flag isn't set → falls through to existing /assemble flow
+#   - already bootstrapped this session (marker exists)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+source "${SCRIPT_DIR}/lib-common.sh"
+
+INPUT=$(cat)
+SID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SID=""
+
+# Bail 1: no session id (can't gate)
+[ -n "$SID" ] || exit 0
+
+# Bail 2: newRoster not set
+new_roster=$(_project_json_get newRoster)
+[ "$new_roster" = "true" ] || exit 0
+
+# Bail 3: already bootstrapped this session
+MARKER=".brains_in_a_hat/state/new-roster-bootstrapped.${SID}"
+[ -f "$MARKER" ] && exit 0
+
+mkdir -p .brains_in_a_hat/state
+touch "$MARKER"
+
+# Set active marker so other hooks know team is active (compat with existing flow)
+echo "active" > ".brains_in_a_hat/state/active.${SID}"
+
+REPO_KEY=$(derive_project_key)
+PROJECT_GROUP=$(derive_project_group)
+TEAM_NAME="hatbrains-${REPO_KEY}"
+
+read -r -d '' INSTRUCTION <<EOF || true
+NEW-ROSTER BOOTSTRAP (newRoster=true detected in .brains_in_a_hat/project.json):
+
+This session uses the v1.0.0-alpha 5-agent roster — not the legacy 21-agent team.
+Your roster (Neal + 4 teammates):
+  - Neal (you, main thread) — orchestrator + meta-analysis (friction patterns, improvement suggestions)
+  - Librarian — always-on storage/retrieval/curation; owns vault git ops
+  - Critic — on-demand reviewer with lens param (architecture|security|performance|ux|correctness)
+  - Builder — on-demand implementation
+  - Scout — on-demand research with explicit retrieval routing
+
+Routing is by intent, NOT by file path (no CODEOWNERS).
+
+Spawn the standing teammate now (one-shot, fire-and-exit, run_in_background=true):
+
+  TeamCreate(team_name="${TEAM_NAME}")
+  Agent(
+    subagent_type="brains-in-a-hat:librarian",
+    name="Librarian",
+    team_name="${TEAM_NAME}",
+    mode="bypassPermissions",
+    run_in_background=true,
+    prompt="Initial spawn. Pull the vault, load ${REPO_KEY}--learnings.md and ${PROJECT_GROUP}--shared--learnings.md, then idle until the librarian-tick hook re-engages you. Project: projectGroup=${PROJECT_GROUP}, repoKey=${REPO_KEY}, vault=\$BRAINS_VAULT_DIR."
+  )
+
+Critic/Builder/Scout are NOT pre-spawned. Spawn them lazily via Agent + SendMessage when a task calls for them.
+
+Vault state: \$BRAINS_VAULT_DIR (must be a git repo). projectGroup=${PROJECT_GROUP}, repoKey=${REPO_KEY}.
+
+When you reply to the user, briefly acknowledge the new roster is online. Don't list all four teammates — that's noise. Just proceed with the user's request.
+EOF
+
+jq -nc --arg ctx "$INSTRUCTION" \
+  '{hookSpecificOutput:{hookEventName:"UserPromptSubmit",additionalContext:$ctx}}'

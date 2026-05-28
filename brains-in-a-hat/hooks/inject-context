@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+#
+# inject-context — SubagentStart hook for the new roster (opt-in)
+#
+# When a teammate spawns, inject:
+#   1. The last N user/assistant turns from the main thread transcript
+#      (so teammates aren't blind to what you and Neal just said).
+#   2. The active <repoKey>--learnings.md frontmatter + body
+#      (so teammates apply learned rules from prior sessions).
+#   3. The active <projectGroup>--shared--learnings.md (cross-repo context).
+#
+# This is the user-asked-for "main thread should always be available"
+# behaviour — implemented by reading transcript_path from the hook input
+# and emitting it as additionalContext on the spawn.
+#
+# Bails (no-op + lets existing inject-subagent-context handle the spawn)
+# when newRoster flag is not set in project.json. Old roster keeps using
+# the existing inject-subagent-context flow.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+source "${SCRIPT_DIR}/lib-common.sh"
+
+INPUT=$(cat)
+TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null) || TRANSCRIPT=""
+
+# Bail if new roster isn't opted in for this repo
+new_roster=$(_project_json_get newRoster)
+[ "$new_roster" = "true" ] || exit 0
+
+# How many recent transcript turns to slice (configurable later)
+TURNS_TO_INJECT=${BRAINS_TRANSCRIPT_TURNS:-20}
+
+# Resolve project keys + vault location
+REPO_KEY=$(derive_project_key)
+PROJECT_GROUP=$(derive_project_group)
+LEARNINGS_FILE="${VAULT_DIR}/${REPO_KEY}--learnings.md"
+SHARED_LEARNINGS="${VAULT_DIR}/${PROJECT_GROUP}--shared--learnings.md"
+
+# Build the transcript slice (last N turns, plain text)
+TRANSCRIPT_SLICE=""
+if [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
+  TRANSCRIPT_SLICE=$(tail -n "$TURNS_TO_INJECT" "$TRANSCRIPT" 2>/dev/null \
+    | jq -r 'select(.type=="user" or .type=="assistant") | "[\(.type)] \(.content // .text // "")"' 2>/dev/null \
+    | head -c 8000)  # cap injection size
+fi
+
+# Read learnings files (may not exist on first run)
+LEARNINGS_CONTENT=""
+[ -f "$LEARNINGS_FILE" ] && LEARNINGS_CONTENT=$(head -c 4000 "$LEARNINGS_FILE") || true
+SHARED_CONTENT=""
+[ -f "$SHARED_LEARNINGS" ] && SHARED_CONTENT=$(head -c 4000 "$SHARED_LEARNINGS") || true
+
+# If nothing to inject, exit clean
+if [ -z "$TRANSCRIPT_SLICE" ] && [ -z "$LEARNINGS_CONTENT" ] && [ -z "$SHARED_CONTENT" ]; then
+  exit 0
+fi
+
+# Build additionalContext as a sectioned text block
+ADDITIONAL_CTX=$(cat <<EOF
+=== MAIN THREAD CONTEXT ===
+You are a teammate spawned by Neal. The main thread between the user and Neal
+is the source of truth for current intent. Below is the last ${TURNS_TO_INJECT}
+turns of that conversation, plus the active learnings for this repo/group.
+
+projectGroup: ${PROJECT_GROUP}
+repoKey: ${REPO_KEY}
+
+--- Main thread (last ${TURNS_TO_INJECT} turns) ---
+${TRANSCRIPT_SLICE:-<no transcript available>}
+
+--- <${REPO_KEY}--learnings.md> ---
+${LEARNINGS_CONTENT:-<no learnings yet>}
+
+--- <${PROJECT_GROUP}--shared--learnings.md> ---
+${SHARED_CONTENT:-<no shared learnings yet>}
+
+=== END MAIN THREAD CONTEXT ===
+EOF
+)
+
+# Emit as additionalContext on the SubagentStart event
+jq -nc --arg ctx "$ADDITIONAL_CTX" \
+  '{hookSpecificOutput:{hookEventName:"SubagentStart",additionalContext:$ctx}}'

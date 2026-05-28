@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+#
+# librarian-tick — TeammateIdle hook for Librarian (new roster, opt-in)
+#
+# Fires when ANY teammate is about to go idle. We filter for Librarian
+# (the only always-on teammate) and re-engage it via the documented
+# "exit code 2 + stdout = new prompt for the idling teammate" pattern,
+# instructing it to:
+#   1. git pull the vault (catch concurrent edits from other devices)
+#   2. process new transcript turns since its saved cursor
+#   3. classify, curate, write
+#   4. git commit + push
+#   5. advance cursor
+#
+# Bails (no-op) when:
+#   - newRoster flag is not set in .brains_in_a_hat/project.json
+#   - the idling teammate is not Librarian
+#   - cursor file says no new transcript turns to process
+#
+# Configuration:
+#   - newRoster opt-in: .brains_in_a_hat/project.json must have
+#     {"newRoster": true}
+#   - Cursor: .brains_in_a_hat/state/librarian-cursor.<SID>
+#     (line offset into transcript_path JSONL; 0 on first tick)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+source "${SCRIPT_DIR}/lib-common.sh"
+
+# Read hook input
+INPUT=$(cat)
+AGENT_NAME=$(echo "$INPUT" | jq -r '.agent_name // empty' 2>/dev/null) || AGENT_NAME=""
+TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null) || TRANSCRIPT=""
+SID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SID=""
+
+# Bail 1: not Librarian → exit 0 (let teammate idle normally)
+[ "$AGENT_NAME" = "Librarian" ] || exit 0
+
+# Bail 2: newRoster flag not set in this repo → exit 0
+new_roster=$(_project_json_get newRoster)
+[ "$new_roster" = "true" ] || exit 0
+
+# Bail 3: no transcript path → can't process
+[ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] || exit 0
+
+CURSOR_FILE=".brains_in_a_hat/state/librarian-cursor.${SID}"
+CURSOR=0
+[ -f "$CURSOR_FILE" ] && CURSOR=$(cat "$CURSOR_FILE") || true
+
+TOTAL_LINES=$(wc -l < "$TRANSCRIPT" 2>/dev/null || echo 0)
+
+# Bail 4: no new turns since last tick
+[ "$TOTAL_LINES" -gt "$CURSOR" ] || exit 0
+
+NEW_TURNS=$((TOTAL_LINES - CURSOR))
+
+# Persist the new cursor BEFORE re-engaging Librarian so concurrent ticks
+# don't double-process. If Librarian fails to process, the cursor still
+# advances — acceptable cost for not duplicating entries.
+echo "$TOTAL_LINES" > "$CURSOR_FILE"
+
+# Emit the re-engagement prompt as stdout. Exit code 2 tells Claude Code
+# to use this as the next prompt for the idling Librarian instead of
+# putting it to sleep.
+cat <<EOF
+TICK: $NEW_TURNS new transcript turns since your last cursor (lines ${CURSOR}..${TOTAL_LINES}). Transcript: $TRANSCRIPT
+
+Run your standard idle-tick procedure:
+  1. git -C "\$VAULT_DIR" pull --rebase --autostash (warn Neal if it fails; continue with local).
+  2. Read the new transcript lines from $TRANSCRIPT (lines ${CURSOR}-${TOTAL_LINES}).
+  3. Classify each meaningful turn (skip noise per your persona).
+  4. For each candidate fact, run curation: update / append / supersede / drop.
+  5. git -C "\$VAULT_DIR" add -A; git -C "\$VAULT_DIR" commit -m "<brief>" || true; git -C "\$VAULT_DIR" push (queue retry on failure).
+  6. SendMessage to Neal with a one-line receipt: "Tick processed N turns, M vault writes."
+
+Stay alive; you'll be re-engaged on the next idle.
+EOF
+exit 2

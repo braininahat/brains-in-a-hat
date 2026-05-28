@@ -6,6 +6,10 @@
         "hooks": [
           {
             "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/new-roster-bootstrap\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+          },
+          {
+            "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/first-prompt-greeting\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
@@ -54,11 +58,26 @@
           },
           {
             "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inject-context\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+          },
+          {
+            "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inject-subagent-context\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
           },
           {
             "type": "command",
             "command": "{ INPUT=$(cat); ID=$(echo \"$INPUT\" | jq -r '.agent_id // .agent_type // empty' 2>/dev/null); mkdir -p .brains_in_a_hat/state; [ -n \"$ID\" ] && touch \".brains_in_a_hat/state/in-subagent.${ID}\"; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+          }
+        ]
+      }
+    ],
+    "TeammateIdle": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/librarian-tick\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       }
