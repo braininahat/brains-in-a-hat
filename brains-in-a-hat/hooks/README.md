@@ -9,14 +9,14 @@ Claude Code lifecycle hooks for the brains-in-a-hat plugin (v1.0.0-alpha).
 | `hooks.json` | Hook wiring — maps all lifecycle events to their handler commands |
 | `lib-common.sh` | Shared helpers: `derive_project_key`, `derive_project_group`, `_project_json_get`, vault path resolution |
 | `lib-research.sh` | Research-cache helpers: `research_cache_dir`, `_sha256`, `classify_research_type`, `normalize_query`, `compute_cache_key`, `cache_shorthash`, `cache_path_for`, `ttl_for_type`, `is_stale`, `find_cache_hit`, `read_cache_field` |
-| `neal-persona.md` | Neal's full system prompt — team roster, routing rules, retrieval routing, RECORD-REQUEST sentinel, peer agency, meta-analysis |
+| `neal-persona.md` | Neal's full system prompt — team roster with real names (Dewey/Ebert/Marco/Wright + Ada/Grace/Shannon builders), routing rules, architect routing, builder specialization + best-fit routing, retrieval routing, RECORD-REQUEST sentinel (project learnings→Dewey), UPSTREAM-ISSUE-REQUEST sentinel (plugin issues→Builder via scripts/file-plugin-issue.sh), peer agency, meta-analysis |
 | `run-hook.cmd` | Cross-platform polyglot wrapper — single command path for both Windows (cmd.exe) and Unix |
 | `session-start` | SessionStart — bootstraps `.brains_in_a_hat/state/`, cleans stale markers (`active.*`, `in-subagent.*`, `compact-pending.*`), writes `active.<SID>` |
-| `new-roster-bootstrap` | UserPromptSubmit — on first prompt of session: emits Neal orientation instructions including `COMPACTION RECOVERY` banner when `compact-pending.<SID>` exists |
+| `new-roster-bootstrap` | UserPromptSubmit — on first prompt of session: emits Neal orientation with real-name roster and instructs Neal to spawn the 4 singletons eagerly (Dewey/Ebert/Marco/Wright); Builders are on-demand. Emits `COMPACTION RECOVERY` banner when `compact-pending.<SID>` exists |
 | `inject-context` | SubagentStart — injects main thread transcript slice, active learnings files, and team ROSTER block into every teammate spawn |
-| `librarian-tick` | TeammateIdle (Librarian only) — advance-only-on-confirmed-commit receipt model: writes sidecar `librarian-pending.<SID>` before re-engaging; on next tick checks vault HEAD advanced; bounded retry (3×) then escalates + advances cursor |
+| `librarian-tick` | TeammateIdle (Dewey/Librarian only) — advance-only-on-confirmed-commit receipt model: writes sidecar `librarian-pending.<SID>` before re-engaging; on next tick checks vault HEAD advanced; bounded retry (3×) then escalates + advances cursor |
 | `enforce-neal-allowlist` | PreToolUse (parent session) — restricts Neal to read+delegate; subagents bypass via `in-subagent.*` markers |
-| `enforce-teammate-lanes` | PreToolUse (subagents only) — per-role write lane enforcement: Librarian → vault only; Critic/Scout → no Write/Edit/git-commit; Builder → full access |
+| `enforce-teammate-lanes` | PreToolUse (subagents only) — per-role write lane enforcement: Librarian → vault only; Critic/Scout/Architect → no Write/Edit/git-commit/push; Builder → full access |
 | `capture-research` | PostToolUse (WebSearch, WebFetch, context7) — auto-captures results as content-addressed vault markdown (`research-cache--<subtype>--<shorthash>.md`); atomic tmp→mv write; skips empty/<200B/HTTP-4xx |
 | `vault-check` | PreToolUse (WebSearch, WebFetch, context7) — advisory only, never blocks; on cache hit emits `VAULT HINT [FRESH|STALE]` via `hookSpecificOutput.additionalContext`; `[vault-reviewed]` suppresses |
 
@@ -71,7 +71,7 @@ Librarian goes idle
     │
     ▼
 TeammateIdle ──► librarian-tick
-                   ├─ Gate: agent_name must be "Librarian"
+                   ├─ Gate: agent_name must be "Dewey" (Librarian)
                    ├─ Receipt check (if librarian-pending.<SID> exists):
                    │    • Read PRE_HEAD, PROPOSED_CURSOR, RETRY from sidecar
                    │    • If vault HEAD advanced → commit cursor, rm sidecar, continue
@@ -102,8 +102,8 @@ PreToolUse[*] ──► enforce-teammate-lanes
                    ├─ Builder → allow all
                    ├─ Librarian + Write/Edit: deny unless file_path is under $VAULT_DIR
                    ├─ Librarian + Bash git-commit/push: deny unless command contains $VAULT_DIR path
-                   ├─ Critic/Scout + Write/Edit: always deny
-                   └─ Critic/Scout + Bash git-commit/push: deny
+                   ├─ Critic/Scout/Architect + Write/Edit: always deny
+                   └─ Critic/Scout/Architect + Bash git-commit/push: deny
 
 Write tool call
     │
@@ -201,4 +201,13 @@ Cursor advances **only after a confirmed vault commit**:
 2. On the next tick, if the sidecar exists:
    - Vault HEAD advanced → commit cursor, delete sidecar, continue normally.
    - Vault HEAD unchanged → RETRY++. If RETRY ≥ 3: advance cursor (accepting the loss), escalate Neal, bail. Otherwise re-slice same lines + warn.
-3. Every TICK prompt mandates a commit (even `--allow-empty` for nothing-to-record) and requires Librarian to report the commit SHA to Neal.
+3. Every TICK prompt mandates a commit (even `--allow-empty` for nothing-to-record) and requires Dewey (Librarian) to report the commit SHA to Neal.
+
+## Scripts inventory
+
+Scripts live in `../scripts/` (one level above this directory).
+
+| Script | Purpose |
+|--------|---------|
+| `vault-init.sh` | Bootstrap the vault. Subcommands: `detect \| init \| clone \| auto`. Auto-detects `<gh-user>/hatbrains-vault` on new devices. |
+| `file-plugin-issue.sh` | File a GitHub issue on `braininahat/brains-in-a-hat` from any project. Always targets the plugin repo regardless of CWD. Deduplicates by title (appends a recurrence comment on close-title matches). Used by Builders via the `UPSTREAM-ISSUE-REQUEST:` sentinel in `neal-persona.md`. Usage: `file-plugin-issue.sh --title "..." [--body "..." \| --body @path] [--label l1,l2] [--dry-run]` |

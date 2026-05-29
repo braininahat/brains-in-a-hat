@@ -10,6 +10,7 @@
 #   Librarian → Write/Edit only under $BRAINS_VAULT_DIR; git only on vault repo
 #   Critic    → no repo Write/Edit/git-commit/push; read-only repo access
 #   Scout     → no repo Write/Edit/git-commit/push; read-only repo access
+#   Architect → no repo Write/Edit/git-commit/push; read-only repo access
 #   Builder   → full repo access (no lane restriction)
 #   Neal/lead → governed by enforce-neal-allowlist, not this hook
 #
@@ -121,7 +122,7 @@ case "$ROLE" in
     esac
     ;;
 
-  critic|scout)
+  critic|scout|architect)
     case "$TOOL_NAME" in
       Write|Edit)
         FILE=$(printf '%s' "$TOOL_INPUT" | jq -r '.file_path // empty' 2>/dev/null) || FILE=""
