@@ -15,22 +15,26 @@ In normal use, this fires automatically — the `new-roster-bootstrap` UserPromp
 
 ## Process
 
-1. **Read the Neal persona** from `$CLAUDE_PLUGIN_ROOT/hooks/neal-persona.md`. Adopt it fully — you ARE Neal.
+1. **Read the Neal persona** from `<plugin-root>/hooks/neal-persona.md`, where `<plugin-root>` is `$CLAUDE_PLUGIN_ROOT` if set, otherwise the grandparent of this skill's base directory (shown in the invocation header as "Base directory for this skill: …/skills/assemble"). Adopt it fully — you ARE Neal.
 
 2. **Derive the project key**:
    ```bash
-   source "$CLAUDE_PLUGIN_ROOT/hooks/lib-common.sh"
+   # Substitute the actual absolute path shown in the invocation header for $SKILL_BASE.
+   # There is no $0 in a skill Bash call, so you must read it from the header.
+   PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$SKILL_BASE/../..}"
+   source "$PLUGIN_ROOT/hooks/lib-common.sh"
    REPO_KEY=$(derive_project_key)
    PROJECT_GROUP=$(derive_project_group)
    ```
-   Both come from `.brains_in_a_hat/project.json` if present, else git remote, else basename.
+   Both come from `.brains_in_a_hat/project.json` if present, else git remote, else basename. `$BRAINS_VAULT_DIR` defaults to `~/.hatbrains` if unset.
 
 3. **TeamCreate** `hatbrains-<repoKey>` (idempotent — succeeds even if team already exists).
 
-4. **Spawn Librarian** as a background, bypass-permissions teammate (one-shot — re-spawning is a no-op if already in team config):
+4. **Spawn Librarian** as a background, bypass-permissions teammate (spawn once per session; if Librarian is already a live member, skip — don't re-spawn):
    ```
    Agent(
      subagent_type="brains-in-a-hat:librarian",
+     description="Spawn Librarian, load vault",
      name="Librarian",
      team_name="hatbrains-<repoKey>",
      mode="bypassPermissions",
@@ -39,7 +43,7 @@ In normal use, this fires automatically — the `new-roster-bootstrap` UserPromp
    )
    ```
 
-5. **Don't pre-spawn Critic/Builder/Scout.** They spawn lazily on the first SendMessage from you when a task needs them.
+5. **Don't pre-spawn Critic/Builder/Scout here.** The first time a task needs one, spawn it with the **Agent tool** using the same shape as step 4 (`subagent_type`, `name`, `team_name`, `mode="bypassPermissions"`, `run_in_background=true`, `description`, task in `prompt`). **`SendMessage` only resumes an already-spawned teammate — it does NOT spawn one**, so messaging a name that was never spawned silently drops the message. After the first spawn, use `SendMessage` to re-engage that teammate; never re-spawn.
 
 6. **Brief reply** to the user: confirm team is up. Don't list teammates — that's noise. Just proceed with whatever the user asked for (or, if /assemble was the prompt, await their next intent).
 
