@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+#
+# capture-research — PostToolUse hook
+#
+# Auto-captures the results of external research tool calls into
+# content-addressed vault markdown files. Runs after:
+#   WebSearch, WebFetch, Agent (Explore), mcp__*context7*__* calls.
+#
+# Gate: only active when state/active.* exists (session is live).
+# Empty/error/tiny (<200B) responses are skipped.
+# Writes atomically: tmp file → mv to final path (dedup via same key→same path).
+#
+# Cache schema (plan §3.2): one markdown file per item in VAULT_DIR:
+#   research-cache--<subtype>--<shorthash>.md
+# Frontmatter: type, subtype, key, source_url, content_sha256,
+#   library_version, query, projectGroup, repoKey, captured_by,
+#   session, fetched_at, ttl_days, status, tags, related.
+# Body: tool_response truncated to BRAINS_RESEARCH_CACHE_BODY_CAP (default 6000B).
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+source "${SCRIPT_DIR}/lib-research.sh"   # also sources lib-common.sh
+
+BODY_CAP="${BRAINS_RESEARCH_CACHE_BODY_CAP:-6000}"
+
+# ── Gate: active session only ──────────────────────────────────────────
+if ! ls ".brains_in_a_hat/state/active."* >/dev/null 2>&1; then
+  exit 0
+fi
+
+# ── Read hook input ────────────────────────────────────────────────────
+INPUT=$(cat)
+TOOL_NAME=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null) || TOOL_NAME=""
+TOOL_INPUT=$(printf '%s' "$INPUT" | jq -c '.tool_input // {}' 2>/dev/null) || TOOL_INPUT="{}"
+TOOL_RESPONSE=$(printf '%s' "$INPUT" | jq -c '.tool_response // empty' 2>/dev/null) || TOOL_RESPONSE=""
+
+[ -n "$TOOL_NAME" ] || exit 0
+
+# ── Classify ──────────────────────────────────────────────────────────
+SUBTYPE=$(classify_research_type "$TOOL_NAME")
+# explore: intentionally not wired — Explore (Agent) returns analysis, not a cacheable external doc.
+[ "$SUBTYPE" = "unknown" ] && exit 0
+[ "$SUBTYPE" = "explore" ] && exit 0
+
+# ── Extract primary key + metadata ────────────────────────────────────
+PRIMARY=""
+SOURCE_URL=""
+QUERY=""
+LIBRARY_VERSION=""
+SECONDARY=""
+
+case "$SUBTYPE" in
+  webfetch)
+    PRIMARY=$(printf '%s' "$TOOL_INPUT" | jq -r '.url // empty' 2>/dev/null) || PRIMARY=""
+    SOURCE_URL="$PRIMARY"
+    ;;
+  websearch)
+    PRIMARY=$(printf '%s' "$TOOL_INPUT" | jq -r '.query // empty' 2>/dev/null) || PRIMARY=""
+    QUERY="$PRIMARY"
+    ;;
+  context7)
+    LIB=$(printf '%s' "$TOOL_INPUT" | jq -r '.library_id // .libraryId // empty' 2>/dev/null) || LIB=""
+    VER=$(printf '%s' "$TOOL_INPUT" | jq -r '.version // empty' 2>/dev/null) || VER="latest"
+    PRIMARY="$LIB"
+    SECONDARY="$VER"
+    LIBRARY_VERSION="$VER"
+    QUERY="$LIB"
+    ;;
+  explore)
+    PRIMARY=$(printf '%s' "$TOOL_INPUT" | jq -r '.prompt // empty' 2>/dev/null) || PRIMARY=""
+    QUERY="$PRIMARY"
+    ;;
+esac
+
+[ -n "$PRIMARY" ] || exit 0
+
+# ── Extract response body defensively ─────────────────────────────────
+# Handles: .result / .results[] / .content[].text / raw string
+BODY=""
+if [ -n "$TOOL_RESPONSE" ] && [ "$TOOL_RESPONSE" != "null" ]; then
+  # Try .result (string)
+  BODY=$(printf '%s' "$TOOL_RESPONSE" | jq -r '.result // empty' 2>/dev/null) || BODY=""
+  # Try .content[].text (MCP-style array)
+  if [ -z "$BODY" ]; then
+    BODY=$(printf '%s' "$TOOL_RESPONSE" | jq -r '[.content[]?.text // empty] | join("\n")' 2>/dev/null) || BODY=""
+  fi
+  # Try .results[] joined (WebSearch array)
+  if [ -z "$BODY" ]; then
+    BODY=$(printf '%s' "$TOOL_RESPONSE" | jq -r '[.results[]? | (.title // "") + ": " + (.url // "") + "\n" + (.snippet // .content // "")] | join("\n\n")' 2>/dev/null) || BODY=""
+  fi
+  # Try raw string
+  if [ -z "$BODY" ]; then
+    BODY=$(printf '%s' "$TOOL_RESPONSE" | jq -r '. // empty' 2>/dev/null) || BODY=""
+  fi
+
+  # Skip if response carries an error field (C3: don't cache error blobs)
+  if printf '%s' "$TOOL_RESPONSE" | jq -e '.error // empty' 2>/dev/null | grep -q .; then
+    exit 0
+  fi
+fi
+
+# Skip empty responses
+[ -n "$BODY" ] || exit 0
+
+# Skip HTTP 4xx errors (don't cache error pages)
+if printf '%s' "$BODY" | head -c 100 | grep -qE '^HTTP/[0-9.]+ 4[0-9]{2}|"status"[[:space:]]*:[[:space:]]*4[0-9]{2}'; then
+  exit 0
+fi
+
+# Skip tiny responses (<200B — likely errors or empty pages)
+BODY_LEN=${#BODY}
+[ "$BODY_LEN" -ge 200 ] || exit 0
+
+# ── Compute cache key ──────────────────────────────────────────────────
+FULL_KEY=$(compute_cache_key "$SUBTYPE" "$PRIMARY" "$SECONDARY")
+SHORTHASH=$(cache_shorthash "$FULL_KEY")
+CACHE_FILE=$(cache_path_for "$SUBTYPE" "$SHORTHASH")
+CACHE_DIR=$(research_cache_dir)
+
+# ── Project identity ──────────────────────────────────────────────────
+REPO_KEY=$(derive_project_key)
+PROJECT_GROUP=$(derive_project_group)
+
+# ── Attribution ───────────────────────────────────────────────────────
+CAPTURED_BY=$(printf '%s' "$INPUT" | jq -r '.agent_name // .agent_type // "unknown"' 2>/dev/null) || CAPTURED_BY="unknown"
+SESSION=$(ls -t ".brains_in_a_hat/state/active."* 2>/dev/null | head -1 || echo "")
+SESSION="${SESSION##*active.}"
+
+# ── TTL + timestamp ───────────────────────────────────────────────────
+TTL=$(ttl_for_type "$SUBTYPE" "$PRIMARY")
+FETCHED_AT=$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%SZ)
+
+# ── Content hash ──────────────────────────────────────────────────────
+CONTENT_SHA256=$(_sha256 "$BODY")
+
+# ── Truncate body to cap ───────────────────────────────────────────────
+TRUNCATED_BODY=$(printf '%s' "$BODY" | head -c "$BODY_CAP")
+if [ "${#BODY}" -gt "$BODY_CAP" ]; then
+  TRUNCATED_BODY="${TRUNCATED_BODY}
+... [truncated at ${BODY_CAP}B; full content_sha256: ${CONTENT_SHA256}]"
+fi
+
+# ── Write atomically: tmp → mv ─────────────────────────────────────────
+mkdir -p "$CACHE_DIR"
+TMP_FILE="${CACHE_DIR}/.capture-research-tmp.$$"
+trap 'rm -f "$TMP_FILE"' EXIT
+
+cat > "$TMP_FILE" <<FRONTMATTER
+---
+type: research-cache
+subtype: ${SUBTYPE}
+key: ${FULL_KEY}
+source_url: ${SOURCE_URL}
+content_sha256: ${CONTENT_SHA256}
+library_version: ${LIBRARY_VERSION}
+query: ${QUERY}
+projectGroup: ${PROJECT_GROUP}
+repoKey: ${REPO_KEY}
+captured_by: ${CAPTURED_BY}
+session: ${SESSION}
+fetched_at: ${FETCHED_AT}
+ttl_days: ${TTL}
+status: fresh
+tags: []
+related: []
+---
+${TRUNCATED_BODY}
+FRONTMATTER
+
+mv "$TMP_FILE" "$CACHE_FILE"

@@ -69,7 +69,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/librarian-tick\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/librarian-tick\" 2>> .brains_in_a_hat/state/hook-debug.log"
           }
         ]
       }
@@ -98,6 +98,42 @@
             "command": "{ if ls .brains_in_a_hat/state/active.* &>/dev/null; then mkdir -p .brains_in_a_hat/state; INPUT=$(cat); AGENT=$(echo \"$INPUT\" | jq -r '.tool_input.name // .tool_input.subagent_type // \"agent\"'); DESC=$(echo \"$INPUT\" | jq -r '.tool_input.description // \"\"'); SESSION=$(ls -t .brains_in_a_hat/state/active.* 2>/dev/null | head -1); SESSION=\"${SESSION##*/active.}\"; jq -nc --arg ts \"$(date -Iseconds)\" --arg agent \"$AGENT\" --arg detail \"$DESC\" --arg session \"$SESSION\" '{ts:$ts,agent:$agent,session:$session,event:\"spawn\",detail:$detail}' >> .brains_in_a_hat/state/activity.jsonl; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
+      },
+      {
+        "matcher": "WebSearch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/capture-research\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+          }
+        ]
+      },
+      {
+        "matcher": "WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/capture-research\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__context7__",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/capture-research\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__plugin_context7_context7__",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/capture-research\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+          }
+        ]
       }
     ],
     "PreToolUse": [
@@ -111,11 +147,56 @@
         ]
       },
       {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/enforce-teammate-lanes\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+          }
+        ]
+      },
+      {
         "matcher": "Write",
         "hooks": [
           {
             "type": "command",
             "command": "{ INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r '.tool_input.file_path // empty'); PLUGIN_ROOT=\"${CLAUDE_PLUGIN_ROOT:-__unset__}\"; if [ \"$PLUGIN_ROOT\" != \"__unset__\" ] && echo \"$FILE\" | grep -qF \"$PLUGIN_ROOT\"; then jq -nc '{hookSpecificOutput:{hookEventName:\"PreToolUse\",permissionDecision:\"deny\"},systemMessage:\"Cannot modify plugin files from within an agent.\"}'; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+          }
+        ]
+      },
+      {
+        "matcher": "WebSearch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/vault-check\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+          }
+        ]
+      },
+      {
+        "matcher": "WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/vault-check\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__context7__",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/vault-check\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__plugin_context7_context7__",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/vault-check\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       }

@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+#
+# vault-check — PreToolUse hook (advisory; NEVER blocks)
+#
+# Fires before WebSearch, WebFetch, Agent, and context7 tool calls.
+# Checks whether a fresh (or stale) result already exists in the vault's
+# research-cache. On a hit, emits a VAULT HINT via hookSpecificOutput so
+# the agent knows the answer may already be available without an external
+# fetch. On a miss, exits 0 silently.
+#
+# This hook NEVER sets "deny" or "block". A stale hit surfaces with a
+# STALE — reverify flag so the agent can decide whether to re-fetch.
+#
+# Bypass: if the tool input contains the literal string [vault-reviewed],
+# the hook exits 0 silently (agent has already checked the vault this turn).
+#
+# Gate: only active when state/active.* exists (session is live). Exits 0
+# silently in repos without that marker (no-op outside active sessions).
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+source "${SCRIPT_DIR}/lib-research.sh"  # also sources lib-common.sh
+
+# ── Read hook input ────────────────────────────────────────────────────
+INPUT=$(cat)
+TOOL_NAME=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null) || TOOL_NAME=""
+TOOL_INPUT=$(printf '%s' "$INPUT" | jq -c '.tool_input // {}' 2>/dev/null) || TOOL_INPUT="{}"
+
+# Bail: no tool name
+[ -n "$TOOL_NAME" ] || exit 0
+
+# ── Gate: active session only ──────────────────────────────────────────
+# state/active.* is written by session-start and cleaned up on session end.
+STATE_DIR=".brains_in_a_hat/state"
+if ! ls "${STATE_DIR}/active."* >/dev/null 2>&1; then
+  exit 0
+fi
+
+# ── Bypass: [vault-reviewed] marker ───────────────────────────────────
+# If the tool input contains this token the agent has already checked the
+# vault this turn; skip to avoid a redundant hint.
+if printf '%s' "$TOOL_INPUT" | grep -qF '[vault-reviewed]'; then
+  exit 0
+fi
+
+# ── Classify tool ─────────────────────────────────────────────────────
+SUBTYPE=$(classify_research_type "$TOOL_NAME")
+[ "$SUBTYPE" = "unknown" ] && exit 0
+
+# ── Extract lookup key ────────────────────────────────────────────────
+PRIMARY=""
+URL_HINT=""
+SECONDARY=""
+case "$SUBTYPE" in
+  webfetch)
+    PRIMARY=$(printf '%s' "$TOOL_INPUT" | jq -r '.url // empty' 2>/dev/null) || PRIMARY=""
+    URL_HINT="$PRIMARY"
+    ;;
+  websearch)
+    PRIMARY=$(printf '%s' "$TOOL_INPUT" | jq -r '.query // empty' 2>/dev/null) || PRIMARY=""
+    ;;
+  context7)
+    # context7 calls typically have library_id and optionally version
+    local_lib=$(printf '%s' "$TOOL_INPUT" | jq -r '.library_id // .libraryId // empty' 2>/dev/null) || local_lib=""
+    local_ver=$(printf '%s' "$TOOL_INPUT" | jq -r '.version // empty' 2>/dev/null) || local_ver="latest"
+    PRIMARY="$local_lib"
+    SECONDARY="$local_ver"
+    ;;
+  explore)
+    # Agent (Explore) — key on the prompt
+    PRIMARY=$(printf '%s' "$TOOL_INPUT" | jq -r '.prompt // empty' 2>/dev/null) || PRIMARY=""
+    ;;
+esac
+
+[ -n "$PRIMARY" ] || exit 0
+
+# ── Compute cache key and look up ─────────────────────────────────────
+FULL_KEY=$(compute_cache_key "$SUBTYPE" "$PRIMARY" "$SECONDARY")
+
+CACHE_FILE=$(find_cache_hit "$SUBTYPE" "$FULL_KEY" "$URL_HINT") || CACHE_FILE=""
+[ -n "$CACHE_FILE" ] || exit 0  # miss — no hint to emit
+
+# ── Read cache metadata ────────────────────────────────────────────────
+FETCHED_AT=$(read_cache_field "$CACHE_FILE" "fetched_at")
+TTL_DAYS=$(read_cache_field "$CACHE_FILE" "ttl_days")
+CACHE_STATUS=$(read_cache_field "$CACHE_FILE" "status")
+CACHED_QUERY=$(read_cache_field "$CACHE_FILE" "query")
+CACHED_URL=$(read_cache_field "$CACHE_FILE" "source_url")
+
+# Determine freshness
+[ -n "$TTL_DAYS" ] || TTL_DAYS=$(ttl_for_type "$SUBTYPE" "$PRIMARY")
+FRESHNESS="FRESH"
+if [ -n "$FETCHED_AT" ] && is_stale "$FETCHED_AT" "$TTL_DAYS"; then
+  FRESHNESS="STALE — reverify recommended"
+fi
+
+# Build a short gist from the cache body (first non-frontmatter non-empty line)
+GIST=$(awk 'BEGIN{fm=0} /^---/{fm++; next} fm<2{next} NF{print; exit}' "$CACHE_FILE" 2>/dev/null | head -c 200) || GIST=""
+[ -n "$GIST" ] || GIST="(see $CACHE_FILE)"
+
+# ── Emit advisory hint via hookSpecificOutput ──────────────────────────
+# Never deny. Never block. Just inform.
+HINT="VAULT HINT [${FRESHNESS}]: A cached result for this ${SUBTYPE} exists at ${CACHE_FILE} (fetched: ${FETCHED_AT:-unknown}, TTL: ${TTL_DAYS}d). Gist: ${GIST} — Consider using this instead of re-fetching. Add [vault-reviewed] to suppress this hint."
+
+jq -n \
+  --arg hint "$HINT" \
+  '{hookSpecificOutput: {hookEventName: "PreToolUse", additionalContext: $hint}}'
+exit 0

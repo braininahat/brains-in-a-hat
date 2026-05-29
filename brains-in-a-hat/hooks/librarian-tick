@@ -4,29 +4,57 @@
 #
 # Fires when ANY teammate is about to go idle. We filter for Librarian
 # (the only always-on teammate) and re-engage it via the documented
-# "exit code 2 + stdout = new prompt for the idling teammate" pattern,
-# instructing it to:
-#   1. git pull the vault (catch concurrent edits from other devices)
-#   2. process new transcript turns since its saved cursor
-#   3. classify, curate, write
-#   4. git commit + push
-#   5. advance cursor
+# TeammateIdle re-engagement mechanism:
 #
-# Bails (no-op) when:
-#   - newRoster flag is not set in .brains_in_a_hat/project.json
+#   JSON on stdout + exit 0:
+#     {"continue":false,"stopReason":"...","hookSpecificOutput":
+#       {"hookEventName":"TeammateIdle","additionalContext":"<prompt>"}}
+#
+# NOTE: exit 2 + plain-text-on-stdout is WRONG for TeammateIdle.
+# On exit 2, stdout is ignored by the runtime — only stderr is fed back.
+# The correct signal is JSON on stdout with exit 0 and continue:false.
+# (Previous versions used exit 2 which silently never re-engaged Librarian
+#  — this was the root cause of the original "didn't record the learning"
+#  symptom.)
+#
+# Bails (plain exit 0, no stdout) when:
 #   - the idling teammate is not Librarian
-#   - cursor file says no new transcript turns to process
+#   - no transcript path / transcript not readable
+#   - no new transcript turns to process (and no pending sidecar)
+#
+# Receipt model (advance-only-on-confirmed-vault-commit):
+#   A sidecar state/librarian-pending.<SID> is written BEFORE re-engaging
+#   Librarian. It records:
+#       PRE_HEAD=<vault HEAD SHA at tick-fire time>
+#       PROPOSED_CURSOR=<new total line count>
+#       RETRY=<0-based attempt count>
+#   On the NEXT tick, if vault HEAD advanced → cursor confirmed + promoted.
+#   If unchanged → re-slice + RETRY++. After MAX_RETRIES, escalate Neal
+#   and advance cursor (accept the loss) to avoid infinite retry loops.
 #
 # Configuration:
-#   - newRoster opt-in: .brains_in_a_hat/project.json must have
-#     {"newRoster": true}
-#   - Cursor: .brains_in_a_hat/state/librarian-cursor.<SID>
-#     (line offset into transcript_path JSONL; 0 on first tick)
+#   - Cursor:  .brains_in_a_hat/state/librarian-cursor.<SID>
+#   - Pending: .brains_in_a_hat/state/librarian-pending.<SID>
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "${SCRIPT_DIR}/lib-common.sh"
+
+MAX_RETRIES=3
+
+# ── Helper: emit re-engage JSON and exit 0 ────────────────────────────
+# Usage: reengage_file <tmpfile-containing-prompt-text>
+# Reads the prompt from a temp file so newlines and special chars are
+# handled correctly by jq --rawfile (avoids embedding newlines in shell
+# variables which break jq --arg).
+reengage_file() {
+  local prompt_file="$1"
+  jq -nc --rawfile ctx "$prompt_file" \
+    '{"continue":false,"stopReason":"librarian-tick re-engage","hookSpecificOutput":{"hookEventName":"TeammateIdle","additionalContext":$ctx}}'
+  rm -f "$prompt_file"
+  exit 0
+}
 
 # Read hook input
 INPUT=$(cat)
@@ -34,42 +62,136 @@ AGENT_NAME=$(echo "$INPUT" | jq -r '.agent_name // empty' 2>/dev/null) || AGENT_
 TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null) || TRANSCRIPT=""
 SID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SID=""
 
-# Bail: not Librarian → exit 0 (let teammate idle normally)
+# Bail: not Librarian → exit 0 silently (let teammate idle normally)
 [ "$AGENT_NAME" = "Librarian" ] || exit 0
 
 # Bail: no transcript path → can't process
 [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] || exit 0
 
-CURSOR_FILE=".brains_in_a_hat/state/librarian-cursor.${SID}"
+STATE_DIR=".brains_in_a_hat/state"
+mkdir -p "$STATE_DIR" 2>/dev/null || true
+
+CURSOR_FILE="${STATE_DIR}/librarian-cursor.${SID}"
+PENDING_FILE="${STATE_DIR}/librarian-pending.${SID}"
+
 CURSOR=0
 [ -f "$CURSOR_FILE" ] && CURSOR=$(cat "$CURSOR_FILE") || true
 
 TOTAL_LINES=$(wc -l < "$TRANSCRIPT" 2>/dev/null || echo 0)
 
-# Bail 4: no new turns since last tick
+# ── Receipt check: did Librarian actually commit last tick? ────────────
+if [ -f "$PENDING_FILE" ]; then
+  PRE_HEAD=""
+  PROPOSED_CURSOR=""
+  RETRY=0
+  # Parse the sidecar (KEY=VALUE, one per line)
+  while IFS='=' read -r key val; do
+    case "$key" in
+      PRE_HEAD)         PRE_HEAD="$val" ;;
+      PROPOSED_CURSOR)  PROPOSED_CURSOR="$val" ;;
+      RETRY)            RETRY="$val" ;;
+    esac
+  done < "$PENDING_FILE"
+
+  CURRENT_HEAD=""
+  if [ -d "$VAULT_DIR" ]; then
+    CURRENT_HEAD=$(git -C "$VAULT_DIR" rev-parse HEAD 2>/dev/null || true)
+  fi
+
+  if [ -n "$CURRENT_HEAD" ] && [ "$CURRENT_HEAD" != "$PRE_HEAD" ]; then
+    # Vault HEAD advanced → commit confirmed; promote the pending cursor
+    echo "$PROPOSED_CURSOR" > "$CURSOR_FILE"
+    CURSOR="$PROPOSED_CURSOR"
+    rm -f "$PENDING_FILE"
+  else
+    # No commit detected. Increment retry counter.
+    RETRY=$((RETRY + 1))
+    if [ "$RETRY" -ge "$MAX_RETRIES" ]; then
+      # Escalate. Advance cursor FIRST so the next tick doesn't re-slice
+      # the same turns and re-escalate every 3 ticks forever.
+      echo "$PROPOSED_CURSOR" > "$CURSOR_FILE"
+      rm -f "$PENDING_FILE"
+      ESCALATION_TMP=$(mktemp)
+      cat > "$ESCALATION_TMP" <<ESCEOF
+ESCALATION: Librarian failed to commit to the vault after ${MAX_RETRIES} consecutive ticks. Lines ${CURSOR}..${PROPOSED_CURSOR} are being skipped to prevent an infinite retry loop — they will NOT be re-processed. Vault HEAD has not advanced from ${PRE_HEAD}. Please inspect Librarian's last output and the vault at $VAULT_DIR — it may be unreachable or have a conflict that needs manual resolution. SendMessage to team-lead to report this.
+ESCEOF
+      reengage_file "$ESCALATION_TMP"
+    fi
+    # Update retry count in sidecar, keep PROPOSED_CURSOR unchanged, re-slice from old CURSOR
+    printf 'PRE_HEAD=%s\nPROPOSED_CURSOR=%s\nRETRY=%s\n' \
+      "${PRE_HEAD}" "${PROPOSED_CURSOR}" "${RETRY}" > "$PENDING_FILE"
+    # CURSOR stays at old value so we re-slice the same turns
+    NEW_TURNS=$((TOTAL_LINES - CURSOR))
+    RETRY_TMP=$(mktemp)
+    cat > "$RETRY_TMP" <<RETRYEOF
+TICK (retry ${RETRY}/${MAX_RETRIES}): Your previous tick did not produce a confirmed vault commit (HEAD ${PRE_HEAD} unchanged). You MUST commit this tick. Re-processing $NEW_TURNS transcript turns (lines ${CURSOR}..${TOTAL_LINES}). Transcript: $TRANSCRIPT
+
+MANDATORY: every tick must end with a vault commit, even if the only content is a "nothing-to-record" entry. Run:
+  git -C "\$VAULT_DIR" add -A
+  git -C "\$VAULT_DIR" commit -m "librarian-tick: <brief description or 'nothing to record'>"
+  git -C "\$VAULT_DIR" push
+Then SendMessage to team-lead with: "Tick SHA: <full commit SHA>. Processed N turns, M vault writes."
+If push fails, still commit locally and report the SHA — the push can retry later.
+
+  1. git -C "\$VAULT_DIR" pull --rebase --autostash (warn team-lead if it fails; continue with local).
+  2. Read transcript lines ${CURSOR}-${TOTAL_LINES} from $TRANSCRIPT.
+  3. Classify each meaningful turn (skip noise per your persona).
+  4. For each candidate fact, run curation: update / append / supersede / drop.
+  5. Commit + push as above. REPORT THE COMMIT SHA to team-lead via SendMessage.
+
+Stay alive; you'll be re-engaged on the next idle.
+RETRYEOF
+    reengage_file "$RETRY_TMP"
+  fi
+fi
+
+# Bail: no new turns and no pending sidecar to resolve
 [ "$TOTAL_LINES" -gt "$CURSOR" ] || exit 0
 
 NEW_TURNS=$((TOTAL_LINES - CURSOR))
 
-# Persist the new cursor BEFORE re-engaging Librarian so concurrent ticks
-# don't double-process. If Librarian fails to process, the cursor still
-# advances — acceptable cost for not duplicating entries.
-echo "$TOTAL_LINES" > "$CURSOR_FILE"
+# RECORD-REQUEST fast path: if the new slice contains a literal RECORD-REQUEST:
+# token (placed there by Neal via SendMessage), prepend a hard directive so
+# Librarian cannot classify it as noise. Pure bash detection — no NLP.
+RECORD_REQUEST_PREFIX=""
+if [ -f "$TRANSCRIPT" ] && tail -n +"$((CURSOR + 1))" "$TRANSCRIPT" 2>/dev/null | grep -qF 'RECORD-REQUEST:'; then
+  RECORD_REQUEST_PREFIX="EXPLICIT RECORD REQUEST detected in this slice — you MUST write and commit it; do not classify as noise. Treat every RECORD-REQUEST: line as a mandatory vault write.
 
-# Emit the re-engagement prompt as stdout. Exit code 2 tells Claude Code
-# to use this as the next prompt for the idling Librarian instead of
-# putting it to sleep.
-cat <<EOF
-TICK: $NEW_TURNS new transcript turns since your last cursor (lines ${CURSOR}..${TOTAL_LINES}). Transcript: $TRANSCRIPT
+"
+fi
+
+# Snapshot vault HEAD before re-engaging Librarian
+PRE_HEAD=""
+if [ -d "$VAULT_DIR" ]; then
+  PRE_HEAD=$(git -C "$VAULT_DIR" rev-parse HEAD 2>/dev/null || true)
+fi
+
+# Write the pending sidecar BEFORE emitting the prompt. This records the
+# expected state so the next tick can verify the commit actually happened.
+printf 'PRE_HEAD=%s\nPROPOSED_CURSOR=%s\nRETRY=%s\n' \
+  "${PRE_HEAD}" "${TOTAL_LINES}" "0" > "$PENDING_FILE"
+
+# Build the TICK prompt in a temp file and emit via reengage_file.
+# Using a file (not a shell variable) so jq --rawfile handles newlines correctly.
+TICK_TMP=$(mktemp)
+cat > "$TICK_TMP" <<TICKEOF
+${RECORD_REQUEST_PREFIX}TICK: $NEW_TURNS new transcript turns since your last cursor (lines ${CURSOR}..${TOTAL_LINES}). Transcript: $TRANSCRIPT
+
+MANDATORY: this tick MUST end with a vault commit and push. Even if there is nothing meaningful to record, you must make an empty-record commit so the receipt system can confirm your tick ran:
+  git -C "\$VAULT_DIR" add -A
+  git -C "\$VAULT_DIR" commit -m "librarian-tick: <brief description or 'nothing to record'>"
+  git -C "\$VAULT_DIR" push
+Then SendMessage to team-lead with: "Tick SHA: <full commit SHA>. Processed N turns, M vault writes."
+Omitting the commit or the SHA report will trigger a retry on the next idle.
 
 Run your standard idle-tick procedure:
-  1. git -C "\$VAULT_DIR" pull --rebase --autostash (warn Neal if it fails; continue with local).
+  1. git -C "\$VAULT_DIR" pull --rebase --autostash (warn team-lead if it fails; continue with local).
   2. Read the new transcript lines from $TRANSCRIPT (lines ${CURSOR}-${TOTAL_LINES}).
   3. Classify each meaningful turn (skip noise per your persona).
   4. For each candidate fact, run curation: update / append / supersede / drop.
-  5. git -C "\$VAULT_DIR" add -A; git -C "\$VAULT_DIR" commit -m "<brief>" || true; git -C "\$VAULT_DIR" push (queue retry on failure).
-  6. SendMessage to Neal with a one-line receipt: "Tick processed N turns, M vault writes."
+  5. Commit + push as above. REPORT THE COMMIT SHA to team-lead.
 
 Stay alive; you'll be re-engaged on the next idle.
-EOF
-exit 2
+TICKEOF
+
+reengage_file "$TICK_TMP"

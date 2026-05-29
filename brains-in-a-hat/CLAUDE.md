@@ -6,14 +6,18 @@ Claude Code plugin providing a 5-agent team (Neal + Librarian, Critic, Builder, 
 
 - `agents/` — agent definitions (`librarian.md`, `critic.md`, `builder.md`, `scout.md`).
 - `hooks/` — lifecycle hooks and Neal's persona prompt:
-  - `hooks.json` — wiring for all hook events.
+  - `hooks.json` — wiring for all lifecycle events.
   - `session-start` — bootstrap state dir and stale-marker cleanup.
-  - `new-roster-bootstrap` — first-prompt-of-session orientation. Tells Neal to TeamCreate + spawn Librarian.
-  - `inject-context` — SubagentStart hook. Injects the last N user/assistant turns from the main thread transcript plus the active learnings files into every teammate spawn.
-  - `librarian-tick` — TeammateIdle hook for Librarian. Slices new transcript turns, re-engages Librarian to classify/curate/commit/push.
-  - `enforce-neal-allowlist` — PreToolUse. Restricts Neal to read+delegate; teammates bypass.
+  - `new-roster-bootstrap` — first-prompt-of-session orientation. Emits Neal orientation; emits COMPACTION RECOVERY banner when compact-pending marker exists.
+  - `inject-context` — SubagentStart hook. Injects main thread transcript slice, active learnings, and team ROSTER block into every teammate spawn.
+  - `librarian-tick` — TeammateIdle hook for Librarian. Advance-only-on-confirmed-vault-commit receipt model; RECORD-REQUEST fast-path; bounded retry with escalation.
+  - `enforce-neal-allowlist` — PreToolUse. Restricts Neal to read+delegate; teammates bypass via `in-subagent.*` markers.
+  - `enforce-teammate-lanes` — PreToolUse. Per-role write lane enforcement: Librarian→vault only; Critic/Scout→read-only; Builder→full access.
+  - `capture-research` — PostToolUse (WebSearch/WebFetch/context7). Auto-captures external research results as content-addressed vault markdown; atomic write; dedup via same key→same path.
+  - `vault-check` — PreToolUse (WebSearch/WebFetch/context7). Advisory only (never blocks); emits `VAULT HINT [FRESH|STALE]` when a cache hit exists; `[vault-reviewed]` suppresses.
   - `lib-common.sh` — shared helpers (`derive_project_key`, `derive_project_group`, `_project_json_get`, vault path resolution).
-  - `neal-persona.md` — Neal's full prompt (roster, routing, meta-analysis, retrieval routing).
+  - `lib-research.sh` — research-cache helpers (`compute_cache_key`, `cache_path_for`, `ttl_for_type`, `is_stale`, `find_cache_hit`, `read_cache_field`, etc.).
+  - `neal-persona.md` — Neal's full prompt (roster, routing, cache-first retrieval, RECORD-REQUEST sentinel, peer agency, meta-analysis).
 - `commands/` — empty by design. The only user-facing entry point is `/assemble`. Everything else is routed by Neal as a natural-language intent (review, ship, research, implement, recall).
 - `skills/assemble/` — the sole user-facing command. Auto-fires via the `new-roster-bootstrap` hook on first prompt; only invoked manually if hooks were disabled or the user wants to re-engage mid-session.
 - `scripts/vault-init.sh` — bootstrap helper. `detect | init | clone | auto` subcommands. Auto-detects `<gh-user>/hatbrains-vault` on new devices.
@@ -34,10 +38,11 @@ The vault is a **personal git repository** at `$BRAINS_VAULT_DIR` (default `~/.h
 - `<projectGroup>--session-log.md` — chronological work entries
 - `<descriptor>--decision.md` — one file per decision (ADR pattern)
 - `<concept>.md` — wiki entries
+- `research-cache--<subtype>--<shorthash>.md` — auto-captured external research (written by `capture-research` hook; curated/GC'd by Librarian)
 - `index.md` — top-level dashboard (Dataview queries)
 - `attachments/` — images, plots
 
-Frontmatter fields: `type` (learnings | session-log | decision | wiki | index | preference), `projectGroup`, `repoKey`, `date`, `lastUpdated`, `status`, `tags`, `related`. Tags and status go in frontmatter, never inline `#hashtags`. Cross-references via `[[wikilinks]]`. Dataview queries provide the discoverability.
+Frontmatter fields: `type` (learnings | session-log | decision | wiki | index | preference | research-cache), `projectGroup`, `repoKey`, `date`, `lastUpdated`, `status`, `tags`, `related`. Tags and status go in frontmatter, never inline `#hashtags`. Cross-references via `[[wikilinks]]`. Dataview queries provide the discoverability.
 
 Design philosophy: **a graph database without a database server.** Markdown files + frontmatter + wikilinks. No daemon, no schema migrations, no proprietary store.
 
@@ -55,7 +60,7 @@ Every repo can have `.brains_in_a_hat/project.json`:
 
 ## Hook lifecycle
 
-`SessionStart` (cleanup) → `UserPromptSubmit` (new-roster-bootstrap on first turn) → user prompt → Neal acts → `SubagentStart` (inject-context for spawns) → teammate works → `TeammateIdle` (librarian-tick for Librarian) → `PreToolUse` (enforce-neal-allowlist on Neal's calls) → `PostToolUse` (activity log) → ... → `PreCompact` (compact-pending marker) → `SessionEnd` (instruct Neal to tell Librarian to finalize).
+`SessionStart` (cleanup, write `active.<SID>`) → `UserPromptSubmit` (new-roster-bootstrap orientation + compaction recovery) → user prompt → Neal acts → `SubagentStart` (inject-context: transcript slice + learnings + roster) → teammate works → `TeammateIdle` (librarian-tick: cursor advances only after confirmed vault commit) → `PreToolUse` (enforce-neal-allowlist on Neal; enforce-teammate-lanes on subagents; vault-check advisory on web/context7 calls) → `PostToolUse` (activity log; capture-research auto-writes vault cache for web/context7 results) → ... → `PreCompact` (compact-pending marker) → `SessionEnd` (instruct Neal to tell Librarian to finalize).
 
 No phased rituals. No `/retro`, no `/cleanup`, no manual `/assemble` flow. Improvement happens inline through Librarian's curation and Neal's meta-analysis.
 
@@ -65,7 +70,7 @@ Enforced by `enforce-neal-allowlist` PreToolUse hook. Neal can: Read, Grep, Glob
 
 Neal CANNOT: Write, Edit, NotebookEdit, WebSearch, WebFetch, or destructive Bash. Anything requiring those goes to a teammate.
 
-Teammates bypass the allowlist (`mode: bypassPermissions` at spawn) and never bubble tool permission requests. Detection: `state/in-subagent.<id>` markers written by SubagentStart and removed by SubagentStop.
+Teammates bypass the Neal allowlist (`mode: bypassPermissions` at spawn) but are governed by `enforce-teammate-lanes`: Librarian may only Write/Edit under `$VAULT_DIR`; Critic and Scout are read-only; Builder has full access. Detection of subagent context: `state/in-subagent.<id>` markers written by SubagentStart and removed by SubagentStop.
 
 ## Git workflow
 
