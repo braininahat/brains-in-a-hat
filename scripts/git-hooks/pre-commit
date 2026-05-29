@@ -29,15 +29,20 @@ STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
 
 plugin_changed() {
   local plugin_dir="$1"
-  # True if any staged file is inside this plugin's directory
-  echo "$STAGED" | grep -q "^${plugin_dir}/" && return 0
+  # True if any staged file is inside this plugin's directory.
+  # grep -q exits 1 when no match; the explicit { ...; } block keeps
+  # the failure scoped to this function under set -e.
+  if echo "$STAGED" | grep -q "^${plugin_dir}/"; then
+    return 0
+  fi
   return 1
 }
 
 bump_version() {
   local file="$1"
   local version
-  version=$(grep -oP '"version"\s*:\s*"\K[^"]+' "$file")
+  # grep -oP exits 1 on no-match; `|| true` keeps the assignment exit 0.
+  version=$(grep -oP '"version"\s*:\s*"\K[^"]+' "$file" || true)
 
   if [ -z "$version" ]; then
     return
@@ -81,7 +86,7 @@ sync_marketplace() {
       source_path=$(jq -r ".plugins[$i].source" "$MARKETPLACE")
       plugin_json="${REPO_ROOT}/${source_path}/.claude-plugin/plugin.json"
       [ -f "$plugin_json" ] || continue
-      target_version=$(grep -oP '"version"\s*:\s*"\K[^"]+' "$plugin_json")
+      target_version=$(grep -oP '"version"\s*:\s*"\K[^"]+' "$plugin_json" || true)
       current_version=$(jq -r ".plugins[$i].version" "$tmp")
       if [ "$current_version" != "$target_version" ]; then
         jq ".plugins[$i].version = \"$target_version\"" "$tmp" > "${tmp}.new" && mv "${tmp}.new" "$tmp"
@@ -101,8 +106,8 @@ sync_marketplace() {
       [ -f "$plugin_json" ] || continue
       local plugin_dir name target_version
       plugin_dir=$(dirname "$(dirname "$plugin_json")")
-      name=$(grep -oP '"name"\s*:\s*"\K[^"]+' "$plugin_json" | head -1)
-      target_version=$(grep -oP '"version"\s*:\s*"\K[^"]+' "$plugin_json")
+      name=$(grep -oP '"name"\s*:\s*"\K[^"]+' "$plugin_json" 2>/dev/null | head -1 || true)
+      target_version=$(grep -oP '"version"\s*:\s*"\K[^"]+' "$plugin_json" || true)
       # Update the version line in the marketplace entry block for this plugin
       python3 - "$MARKETPLACE" "$name" "$target_version" <<'PY'
 import json, sys
@@ -144,14 +149,27 @@ sync_marketplace
 README="${REPO_ROOT}/README.md"
 PLUGIN_DIR="${REPO_ROOT}/brains-in-a-hat"
 if [ -f "$README" ] && [ -d "$PLUGIN_DIR/agents" ]; then
-  agents_actual=$(find "$PLUGIN_DIR/agents" -maxdepth 1 -name '*.md' -type f | wc -l | tr -d ' ')
+  # Count files defensively — directories may not exist (e.g. if every
+  # command was deleted, commands/ may be gone). `find` on a missing dir
+  # exits non-zero and would trip pipefail; guard each count.
+  count_md() {
+    local dir="$1" pattern="$2"
+    if [ -d "$dir" ]; then
+      find "$dir" -maxdepth 2 -name "$pattern" -type f 2>/dev/null | wc -l | tr -d ' '
+    else
+      echo 0
+    fi
+  }
+  agents_actual=$(count_md "$PLUGIN_DIR/agents" '*.md')
   # User-invokable commands = anything slash-invokable: commands/*.md + skills/*/SKILL.md
-  cmd_files=$(find "$PLUGIN_DIR/commands" -maxdepth 1 -name '*.md' -type f 2>/dev/null | wc -l | tr -d ' ')
-  skill_files=$(find "$PLUGIN_DIR/skills" -maxdepth 2 -name 'SKILL.md' -type f 2>/dev/null | wc -l | tr -d ' ')
+  cmd_files=$(count_md "$PLUGIN_DIR/commands" '*.md')
+  skill_files=$(count_md "$PLUGIN_DIR/skills" 'SKILL.md')
   commands_actual=$((cmd_files + skill_files))
 
-  agents_readme=$(grep -oE '^\| Agents \| [0-9]+' "$README" | grep -oE '[0-9]+' | head -1 || true)
-  commands_readme=$(grep -oE '^\| Commands \| [0-9]+' "$README" | grep -oE '[0-9]+' | head -1 || true)
+  # Pipefail makes `grep | grep | head` fail if the first grep matches nothing.
+  # Subshell + `|| echo ""` ensures the assignment always succeeds.
+  agents_readme=$( (grep -oE '^\| Agents \| [0-9]+' "$README" 2>/dev/null | grep -oE '[0-9]+' | head -1) || echo "" )
+  commands_readme=$( (grep -oE '^\| Commands \| [0-9]+' "$README" 2>/dev/null | grep -oE '[0-9]+' | head -1) || echo "" )
 
   drift=0
   if [ -n "$agents_readme" ] && [ "$agents_readme" != "$agents_actual" ]; then
