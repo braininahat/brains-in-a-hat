@@ -84,13 +84,13 @@ esac
 # Block with routing suggestion
 case "$TOOL" in
   Write|Edit|NotebookEdit)
-    SUGGEST="Paige (docs-writer) for docs, Mason (architect) for code, Gale (scribe) for session log" ;;
+    SUGGEST="Builder (for code/docs) or Librarian (for vault writes)" ;;
   Bash)
-    SUGGEST="Porter (devops) for git/CI, Chase (qa-engineer) for tests, Reed (session-manager) for state persistence" ;;
+    SUGGEST="Builder (for git/CI/test runs) or Librarian (for vault git ops)" ;;
   WebSearch|WebFetch)
-    SUGGEST="Hunter (researcher) for web research" ;;
+    SUGGEST="Scout (for research and external docs)" ;;
   *)
-    SUGGEST="the appropriate specialist agent" ;;
+    SUGGEST="the appropriate teammate (Librarian | Critic | Builder | Scout)" ;;
 esac
 
 REASON="Team lead can only read, manage tasks, and delegate. Route ${TOOL} to ${SUGGEST}."

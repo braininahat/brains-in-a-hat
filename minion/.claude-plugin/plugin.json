@@ -1,9 +1,0 @@
-{
-  "name": "minion",
-  "version": "2.0.2",
-  "description": "Opus plans and reviews. Qwen CLI drafts code. Structured-prompt delegation via `qwen -p` headless — no MCP server, no llama-server autospawn.",
-  "author": { "name": "braininahat" },
-  "repository": "https://github.com/braininahat/brains-in-a-hat",
-  "license": "MIT",
-  "keywords": ["delegation", "qwen", "qwen-code", "local-llm", "minion", "cli-delegation"]
-}

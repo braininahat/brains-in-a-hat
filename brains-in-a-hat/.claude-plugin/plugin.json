@@ -1,12 +1,12 @@
 {
   "name": "brains-in-a-hat",
-  "description": "21 named specialist agents with Neal as chief of staff, agent teams coordination, vault persistence, and session scribe",
-  "version": "0.6.48",
+  "description": "5-agent Claude Code team with closed-loop self-improvement, Obsidian-synced external memory, multi-repo project constellations",
+  "version": "1.0.0-alpha",
   "author": {
     "name": "braininahat"
   },
   "homepage": "https://github.com/braininahat/brains-in-a-hat",
   "repository": "https://github.com/braininahat/brains-in-a-hat",
   "license": "MIT",
-  "keywords": ["agents", "team", "orchestration", "multi-agent", "code-review", "qa", "architecture"]
+  "keywords": ["claude-code", "claude-code-plugin", "claude-code-agents", "agent-team", "multi-agent", "obsidian", "obsidian-sync", "ai-agents", "agentic-ai", "anthropic", "self-improvement", "external-memory", "prompt-engineering", "developer-tools", "closed-loop-agents"]
 }
