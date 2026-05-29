@@ -43,7 +43,39 @@ In normal use, this fires automatically — the `new-roster-bootstrap` UserPromp
    )
    ```
 
-5. **Don't pre-spawn Critic/Builder/Scout here.** The first time a task needs one, spawn it with the **Agent tool** using the same shape as step 4 (`subagent_type`, `name`, `team_name`, `mode="bypassPermissions"`, `run_in_background=true`, `description`, task in `prompt`). **`SendMessage` only resumes an already-spawned teammate — it does NOT spawn one**, so messaging a name that was never spawned silently drops the message. After the first spawn, use `SendMessage` to re-engage that teammate; never re-spawn.
+5. **Spawn Critic, Builder, and Scout upfront** alongside Librarian (spawn once per session; skip any that are already live members):
+   ```
+   Agent(
+     subagent_type="brains-in-a-hat:critic",
+     description="Spawn Critic, await review tasks",
+     name="Critic",
+     team_name="hatbrains-<repoKey>",
+     mode="bypassPermissions",
+     run_in_background=true,
+     prompt="Initial spawn on team 'hatbrains-<repoKey>'. Read your persona from brains-in-a-hat/agents/critic.md. Idle until Neal routes a review task to you via SendMessage."
+   )
+   Agent(
+     subagent_type="brains-in-a-hat:builder",
+     description="Spawn Builder, await implementation tasks",
+     name="Builder",
+     team_name="hatbrains-<repoKey>",
+     mode="bypassPermissions",
+     run_in_background=true,
+     prompt="Initial spawn on team 'hatbrains-<repoKey>'. Read your persona from brains-in-a-hat/agents/builder.md. Idle until Neal routes an implementation task to you via SendMessage."
+   )
+   Agent(
+     subagent_type="brains-in-a-hat:scout",
+     description="Spawn Scout, await research tasks",
+     name="Scout",
+     team_name="hatbrains-<repoKey>",
+     mode="bypassPermissions",
+     run_in_background=true,
+     prompt="Initial spawn on team 'hatbrains-<repoKey>'. Read your persona from brains-in-a-hat/agents/scout.md. Idle until Neal routes a research task to you via SendMessage."
+   )
+   ```
+   **`SendMessage` only resumes an already-spawned teammate — it does NOT spawn one.** Because all four are spawned here, you can safely use SendMessage to route any task immediately. Never re-spawn a teammate that is already a live member.
+   <!-- Tradeoff: /resume (session restore) does not reinstate in-process teammates.
+        After a /resume you must re-run /assemble to re-spawn the team. -->
 
 6. **Brief reply** to the user: confirm team is up. Don't list teammates — that's noise. Just proceed with whatever the user asked for (or, if /assemble was the prompt, await their next intent).
 

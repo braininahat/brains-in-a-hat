@@ -1,24 +1,24 @@
 # hooks/
 
-Claude Code lifecycle hooks for the brains-in-a-hat plugin.
+Claude Code lifecycle hooks for the brains-in-a-hat plugin (v1.0.0-alpha).
 
 ## File Inventory
 
 | File | Purpose |
 |------|---------|
-| `hooks.json` | Hook wiring — maps all lifecycle events to their commands |
-| `session-start` | SessionStart script — bootstraps vault/state dirs, starts dashboard, cleans stale state files, and (if `source==compact`) writes the compact-pending marker so the recovery banner fires on the next prompt. **No persona injection** — that happens via `/assemble` |
-| `first-prompt-greeting` | UserPromptSubmit script — detects `/assemble` activation, refreshes skills caches, injects the `gather-context` briefing as `additionalContext` on /assemble (one-shot), emits `COMPACTION RECOVERY` systemMessage when `compact-pending.<sid>` exists, emits `RETRO DUE` instruction when `retro-pending.<sid>` exists (checkpoint or final), emits `POST-MORTEM DUE` instruction when `session-end-snapshot.json` exists from a prior session, and injects `CURRENT FOCUS: <value>` on every prompt when team is active |
-| `neal-persona.md` | Neal's full system prompt — team roster, routing rules, model tiers, plan mode behaviour |
-| `run-hook.cmd` | Cross-platform polyglot wrapper — lets hooks.json use a single command path on both Windows (cmd.exe) and Unix (bash) |
-| `gather-context` | Session-context aggregator — runs at /assemble via `first-prompt-greeting`. Outputs the project briefing (git state, backlog, memory, vault state, CODEOWNERS, pending proposals) |
-| `inject-subagent-context` | SubagentStart script — emits PROTOCOLS block plus a precomputed per-agent suffix (RECOMMENDED SKILLS + inline workflow fallbacks for missing skills). Reads from `agent-ctx.cache` built by `refresh-skills-cache` |
-| `refresh-skills-cache` | Scans installed skills once per session, writes three caches: `skills-available.cache`, `skills-missing.cache`, `agent-ctx.cache`. Session-scoped via PID marker |
-| `update-session-state` | PostToolUse[Agent] script — appends spawned agent name to `session-state.json` under a directory-based lock (safe for concurrent sessions) |
-| `enforce-neal-allowlist` | PreToolUse catch-all — enforces Neal's tool allowlist (Read, Grep, Glob, LS, Agent, SendMessage, Task*, Team*, AskUserQuestion, mode tools, Skill, ToolSearch, plugin-infra Bash, curated read-only Bash — `gh list/view/api/search`, `git log/status/diff/show/blame/config --get`, `ls`, `cat`, `head`, `tail`, `wc`, `file`, `pwd`, `whoami`, `date` — with shell metacharacters rejected). Subagents bypass the allowlist via `.brains_in_a_hat/state/in-subagent.*` marker files written by `SubagentStart` and removed by `SubagentStop` |
-| `pretool-agent-check` | PreToolUse[Agent] script — enforces sonnet ceiling (blocks opus for team members), advises model tier based on task keywords, runs vault-check which emits an **advisory** `VAULT HINT` as `hookSpecificOutput.additionalContext` (not a hard block) when prior research matches, with `[vault-reviewed]` bypass |
-| `record-decision` | Helper called by Reed (session-manager) via Bash allowlist — persists decisions to `session-state.json.decisions` under a directory lock |
-| `lib-common.sh` | Shared helpers (currently `detect_project_name` — resolves project name via gh or pwd basename) |
+| `hooks.json` | Hook wiring — maps all lifecycle events to their handler commands |
+| `lib-common.sh` | Shared helpers: `derive_project_key`, `derive_project_group`, `_project_json_get`, vault path resolution |
+| `lib-research.sh` | Research-cache helpers: `research_cache_dir`, `_sha256`, `classify_research_type`, `normalize_query`, `compute_cache_key`, `cache_shorthash`, `cache_path_for`, `ttl_for_type`, `is_stale`, `find_cache_hit`, `read_cache_field` |
+| `neal-persona.md` | Neal's full system prompt — team roster, routing rules, retrieval routing, RECORD-REQUEST sentinel, peer agency, meta-analysis |
+| `run-hook.cmd` | Cross-platform polyglot wrapper — single command path for both Windows (cmd.exe) and Unix |
+| `session-start` | SessionStart — bootstraps `.brains_in_a_hat/state/`, cleans stale markers (`active.*`, `in-subagent.*`, `compact-pending.*`), writes `active.<SID>` |
+| `new-roster-bootstrap` | UserPromptSubmit — on first prompt of session: emits Neal orientation instructions including `COMPACTION RECOVERY` banner when `compact-pending.<SID>` exists |
+| `inject-context` | SubagentStart — injects main thread transcript slice, active learnings files, and team ROSTER block into every teammate spawn |
+| `librarian-tick` | TeammateIdle (Librarian only) — advance-only-on-confirmed-commit receipt model: writes sidecar `librarian-pending.<SID>` before re-engaging; on next tick checks vault HEAD advanced; bounded retry (3×) then escalates + advances cursor |
+| `enforce-neal-allowlist` | PreToolUse (parent session) — restricts Neal to read+delegate; subagents bypass via `in-subagent.*` markers |
+| `enforce-teammate-lanes` | PreToolUse (subagents only) — per-role write lane enforcement: Librarian → vault only; Critic/Scout → no Write/Edit/git-commit; Builder → full access |
+| `capture-research` | PostToolUse (WebSearch, WebFetch, context7) — auto-captures results as content-addressed vault markdown (`research-cache--<subtype>--<shorthash>.md`); atomic tmp→mv write; skips empty/<200B/HTTP-4xx |
+| `vault-check` | PreToolUse (WebSearch, WebFetch, context7) — advisory only, never blocks; on cache hit emits `VAULT HINT [FRESH|STALE]` via `hookSpecificOutput.additionalContext`; `[vault-reviewed]` suppresses |
 
 ## Hook Execution Order
 
@@ -26,187 +26,179 @@ Claude Code lifecycle hooks for the brains-in-a-hat plugin.
 Session opens
     │
     ▼
-SessionStart ──► session-start (via run-hook.cmd)
-                   ├─ Starts dashboard server (non-blocking)
-                   ├─ First-run: creates vault dirs, CODEOWNERS, Obsidian config
-                   ├─ Cleans stale state: active.*, missing-shown.*,
-                   │                     skills-cache-built.*,
-                   │                     gather-context-emitted.*,
-                   │                     post-mortem-emitted.*,
-                   │                     compact-pending.* (mismatched),
-                   │                     in-subagent.* (all),
-                   │                     retro.lock.d, session-state.json.lock.d
-                   ├─ If source==compact, writes compact-pending.<sid>
-                   │  so first-prompt-greeting will emit the recovery banner
-                   ├─ Appends session record to ~/.brains_in_a_hat/active-sessions.jsonl
-                   └─ No persona injection (bootstrap only)
+SessionStart ──► session-start
+                   ├─ mkdir -p .brains_in_a_hat/state
+                   ├─ rm stale markers: in-subagent.*, compact-pending.*
+                   │                   (from prior sessions)
+                   └─ touch active.<SID>
 
-User sends message (any prompt)
+User sends first message of session
     │
     ▼
-UserPromptSubmit ──► first-prompt-greeting
-                       ├─ Detects /assemble — creates .brains_in_a_hat/state/active.<PID>
-                       ├─ When team active: refreshes skills caches (once per session)
-                       ├─ First prompt of session: emits missing-skills banner
-                       │                          (if any expected skills missing)
-                       ├─ On /assemble (one-shot): runs gather-context and
-                       │                injects the full session briefing as
-                       │                additionalContext (includes missing-skills
-                       │                banner if any)
-                       └─ Post-compaction only: emits COMPACTION RECOVERY systemMessage
-                                          (gated by compact-pending.<sid> marker
-                                          written by PreCompact hook or by
-                                          session-start on source==compact)
+UserPromptSubmit ──► new-roster-bootstrap
+                       ├─ Emits Neal orientation as additionalContext (one-shot,
+                       │  gated by gather-context-emitted.<SID> marker)
+                       └─ If compact-pending.<SID> exists: emits COMPACTION RECOVERY
+                          systemMessage and removes marker
 
 Conversation about to be compacted
     │
     ▼
-PreCompact ──► (inline command)
-                └─ Writes .brains_in_a_hat/state/compact-pending.<session_id>
-                   so first-prompt-greeting emits the COMPACTION RECOVERY
-                   banner on the next user prompt after compaction completes.
+PreCompact ──► (inline)
+               └─ touch .brains_in_a_hat/state/compact-pending.<SID>
 
 Agent spawned
     │
     ▼
 SubagentStart ──► (three steps)
-                   ├─ Step 1: appends { ts, agent, session, event:"start" } to activity.jsonl
-                   ├─ Step 2: inject-subagent-context — emits PROTOCOLS + SHARED CONTEXT
-                   │          (curated by Gale, read from session-state.json) + precomputed
-                   │          suffix (RECOMMENDED SKILLS + inline fallbacks)
-                   └─ Step 3: writes .brains_in_a_hat/state/in-subagent.<id>
-                              (used by enforce-neal-allowlist to detect subagent context)
+                   ├─ Step 1 (inline): append {ts, agent, session, event:"start"} to activity.jsonl
+                   ├─ Step 2: inject-context — emits additionalContext with:
+                   │          • last N transcript turns (BRAINS_TRANSCRIPT_TURNS, default 20)
+                   │          • <repoKey>--learnings.md (up to 4000B)
+                   │          • <projectGroup>--shared--learnings.md (up to 4000B)
+                   │          • ROSTER block from ~/.claude/teams/hatbrains-<repoKey>/config.json
+                   │            (peer names + roles; DM-for-clarification note)
+                   └─ Step 3 (inline): touch .brains_in_a_hat/state/in-subagent.<ID>
 
 Agent completes
     │
     ▼
 SubagentStop ──► (two steps)
-                  ├─ Step 1: appends { ts, agent, session, event:"done" } to activity.jsonl
-                  └─ Step 2: removes .brains_in_a_hat/state/in-subagent.<id>
+                  ├─ Step 1 (inline): append {ts, agent, session, event:"done"} to activity.jsonl
+                  └─ Step 2 (inline): rm .brains_in_a_hat/state/in-subagent.<ID>
 
-Tool call: Agent
+Librarian goes idle
     │
     ▼
-PostToolUse[Agent] ──► (three steps)
-                         ├─ Step 1: appends { ts, agent, session, event:"spawn", detail } to activity.jsonl
-                         ├─ Step 2: update-session-state — locks & updates spawned_agents
-                         │          in session-state.json
-                         └─ Step 3: prompts Neal to SendMessage Gale with findings (skipped for Gale itself)
+TeammateIdle ──► librarian-tick
+                   ├─ Gate: agent_name must be "Librarian"
+                   ├─ Receipt check (if librarian-pending.<SID> exists):
+                   │    • Read PRE_HEAD, PROPOSED_CURSOR, RETRY from sidecar
+                   │    • If vault HEAD advanced → commit cursor, rm sidecar, continue
+                   │    • If unchanged → RETRY++; if RETRY≥3 advance cursor + escalate Neal
+                   │                    else re-slice same turns + WARN prompt
+                   ├─ RECORD-REQUEST fast-path: grep slice for literal "RECORD-REQUEST:"
+                   │   token; if present prepend hard mandatory-write directive
+                   ├─ Snapshot vault PRE_HEAD; write librarian-pending.<SID>
+                   └─ Emit TICK prompt (exit 2): mandates commit every tick,
+                      requires SHA receipt via SendMessage to Neal
 
-Any tool call
+Any tool call (parent session / Neal)
     │
     ▼
 PreToolUse[*] ──► enforce-neal-allowlist
-                   ├─ If any .brains_in_a_hat/state/in-subagent.* marker exists,
-                   │  exit 0 — caller is inside a subagent, allowed everything.
-                   └─ Otherwise (parent session / Neal): checks the tool against
-                      the allowlist (Read, Grep, Glob, LS, Agent, SendMessage,
-                      Task*, Team*, AskUserQuestion, mode tools, ToolSearch,
-                      Skill, plugin-infra Bash, curated read-only Bash). Blocks
-                      the rest with a routing suggestion.
+                   ├─ Gate: active.* must exist
+                   ├─ If any in-subagent.* marker → exit 0 (subagent, not Neal)
+                   └─ Neal allowlist: Read, Grep, Glob, LS, Agent, SendMessage,
+                      Task*, Team*, AskUserQuestion, mode tools, ToolSearch, Skill,
+                      plugin-infra Bash, curated read-only Bash.
+                      Blocks rest with routing suggestion.
 
-PreToolUse[Write] ──► (plugin-file guard)
-                        └─ Blocks writes whose file_path is inside $CLAUDE_PLUGIN_ROOT
-                           (prevents agents from modifying plugin files)
+Any tool call (subagents)
+    │
+    ▼
+PreToolUse[*] ──► enforce-teammate-lanes
+                   ├─ Gate: active.* must exist AND in-subagent.* must exist
+                   ├─ Builder → allow all
+                   ├─ Librarian + Write/Edit: deny unless file_path is under $VAULT_DIR
+                   ├─ Librarian + Bash git-commit/push: deny unless command contains $VAULT_DIR path
+                   ├─ Critic/Scout + Write/Edit: always deny
+                   └─ Critic/Scout + Bash git-commit/push: deny
 
-PreToolUse[Agent] ──► pretool-agent-check
-                        ├─ Enforces sonnet ceiling (blocks opus for team members)
-                        ├─ Runs vault-check — blocks spawn if prior research exists
-                        │  in the vault and the prompt lacks [vault-reviewed] marker
-                        │  (exempts brains-in-a-hat: team members)
-                        └─ Advises model tier based on task keywords
+Write tool call
+    │
+    ▼
+PreToolUse[Write] ──► (inline plugin-file guard)
+                        └─ Deny if file_path is inside $CLAUDE_PLUGIN_ROOT
+
+WebSearch / WebFetch / context7 tool call (pre)
+    │
+    ▼
+PreToolUse ──► vault-check
+                ├─ Gate: active.* must exist; [vault-reviewed] in input → skip
+                ├─ Classify tool → subtype; extract URL/query/library_id
+                ├─ compute_cache_key → cache_shorthash → cache_path_for
+                ├─ find_cache_hit: direct path, then source_url: grep fallback
+                └─ On hit: read fetched_at/ttl_days, compute FRESH/STALE,
+                   emit hookSpecificOutput.additionalContext with VAULT HINT.
+                   NEVER deny/block.
+
+Agent spawn (PostToolUse)
+    │
+    ▼
+PostToolUse[Agent] ──► (inline)
+                         └─ Append {ts, agent, session, event:"spawn", detail} to activity.jsonl
+
+WebSearch / WebFetch / context7 tool call (post)
+    │
+    ▼
+PostToolUse ──► capture-research
+                 ├─ Gate: active.* must exist
+                 ├─ classify_research_type(tool_name) → skip unknown
+                 ├─ Extract primary key (URL / query / library_id@version / prompt)
+                 ├─ Extract body defensively: .result / .content[].text /
+                 │  .results[]{title+snippet} / raw string
+                 ├─ Skip: empty, <200B, HTTP-4xx
+                 ├─ compute_cache_key → cache_shorthash → cache_path_for
+                 │  (same key → same path → refresh-in-place dedup)
+                 └─ Write atomically (tmp → mv):
+                    research-cache--<subtype>--<shorthash>.md
+                    with full frontmatter + body truncated to BRAINS_RESEARCH_CACHE_BODY_CAP (6000B)
 
 Session closes
     │
     ▼
-SessionEnd ──► (inline command)
-               ├─ Writes retro-pending.<sid>="final" marker
-               ├─ Copies session-state.json → session-end-snapshot.json (safety net)
-               └─ Emits additionalContext instructing Neal to spawn ALL THREE in parallel
-                  (fire-and-exit, do NOT wait):
-                  (1) SendMessage(to=Gale) to finalize session chapter + compile PDF
-                  (2) Agent(Mira, mode=final) for the retrospective
-                  (3) Agent(Reed, mode=persist) for decision promotion + preferences only
-                  (Reed no longer writes retros — that's Mira's job; duplication removed)
+SessionEnd ──► (inline)
+               └─ If active.* exists: emit additionalContext instructing Neal to
+                  SendMessage Librarian for final tick (commit + push vault).
+                  No retros, no phased ceremonies.
 ```
 
-## Compaction detection
+## Research cache schema
 
-`PreCompact` fires before Claude Code compacts the conversation. The hook writes
-TWO markers: `.brains_in_a_hat/state/compact-pending.<session_id>` and
-`.brains_in_a_hat/state/retro-pending.<session_id>` containing `checkpoint`.
-On the next user prompt, `first-prompt-greeting` emits the COMPACTION RECOVERY
-systemMessage AND a RETRO DUE instruction, deleting both markers as one-shots.
-Belt + suspenders: `session-start` also writes `compact-pending` if its
-`source` field is `compact` — covers auto-compact cases where the PreCompact
-hook may not have fired cleanly.
+One markdown file per captured result, in `$VAULT_DIR` (flat, git-synced):
 
-## Retro triggers
+```
+research-cache--<subtype>--<shorthash>.md
+```
 
-Two retro events fire automatically:
+where `shorthash` = first 12 hex chars of `sha256(canonical_key)`.
 
-- **Checkpoint retro** — `PreCompact` writes `retro-pending.<sid>="checkpoint"`.
-  After compaction, `first-prompt-greeting` instructs Neal to spawn Mira in
-  `mode=checkpoint`. Mira reads session-state.json, activity.jsonl, and the
-  session-log in vault (all survive compaction), writes a condensed retro,
-  does NOT touch CODEOWNERS/patterns.md/workflow.md.
-- **Final retro** — `SessionEnd` writes `retro-pending.<sid>="final"` and
-  instructs Neal to spawn Mira in `mode=final` (full retro with all
-  maintenance) in parallel with Reed(mode=persist) and Gale-finalize.
+**Frontmatter:**
+```yaml
+---
+type: research-cache
+subtype: context7 | webfetch | websearch | explore
+key: <full sha256>
+source_url: <url>
+content_sha256: <sha256 of body>
+library_version: <version or "">
+query: <query string>
+projectGroup: <slug>
+repoKey: <slug>
+captured_by: <agent_name or "unknown">
+session: <session id>
+fetched_at: <ISO 8601>
+ttl_days: <integer>
+status: fresh | stale | promoted
+tags: []
+related: []
+---
+<body, truncated to BRAINS_RESEARCH_CACHE_BODY_CAP (default 6000B)>
+```
 
-A concurrency guard at `.brains_in_a_hat/state/retro.lock.d` (directory lock)
-prevents overlapping retro runs — if a second retro fires while the first is
-still writing, the second exits cleanly. `session-start` clears the lock as a
-safety net on every boot.
-
-## Session-end snapshot + post-mortem detection
-
-`SessionEnd` copies `session-state.json` to `session-end-snapshot.json` as a
-durable safety net. If the previous session ended without Neal actioning the
-SessionEnd fanout (race: Neal may not have had a turn between the hook firing
-and the session terminating), the snapshot survives. On the next session's
-first prompt, `first-prompt-greeting` detects the snapshot and emits a
-`POST-MORTEM DUE` systemMessage instructing Neal to spawn Reed in `mode=persist`
-to process it. Reed is expected to delete the snapshot after processing.
-A PID-keyed `post-mortem-emitted.<PID>` marker prevents the banner from
-re-firing within the same session.
+**TTL defaults:** context7 → 30d, websearch/webfetch/explore → 7d. Override via `BRAINS_TTL_<SUBTYPE>` env vars. Security/CVE content → 1d always.
 
 ## Subagent context detection
 
-`SubagentStart` writes `.brains_in_a_hat/state/in-subagent.<id>` — one file
-per active subagent, keyed by `agent_id` (or falling back to `agent_type`).
-Parallel subagents produce multiple markers. `SubagentStop` removes the
-marker. `enforce-neal-allowlist` uses glob existence
-(`ls .brains_in_a_hat/state/in-subagent.* &>/dev/null`) as the
-"am I inside a subagent?" signal. Stale markers are wiped by `session-start`
-on every session boot (no subagents can be running at that point).
+`SubagentStart` writes `.brains_in_a_hat/state/in-subagent.<id>` (keyed by `agent_id` or `agent_type`). `SubagentStop` removes it. Both `enforce-neal-allowlist` and `enforce-teammate-lanes` use glob existence as the "am I inside a subagent?" signal. `session-start` wipes all stale markers on boot.
 
-This replaces the prior `transcript_path` regex, which was dead code:
-Claude Code's PreToolUse hook input passes the PARENT session's transcript
-path, so `/subagents/agent-` never matched in practice. The allowlist was
-silently applying to every tool call regardless of subagent context.
+## Librarian-tick receipt model
 
-## Shared Protocols (injected at SubagentStart)
+Cursor advances **only after a confirmed vault commit**:
 
-Every agent receives these protocols at spawn time via the SubagentStart hook:
-
-**Activity Reporting**
-Log key moments to `.brains_in_a_hat/state/activity.jsonl` using `jq -nc`. Event types: `start`, `read`, `finding`, `message`, `done`. Keep to 3–6 events per task.
-
-**Code Navigation**
-Prefer LSP (Pyright) over Grep/Read for Python — 5–20x more token efficient.
-
-**Communication**
-Report findings to team-lead via SendMessage. You may also message teammates directly by name. Never interact with the user directly.
-
-**Team Context**
-You are part of team `hatbrains`. Check TaskList for assigned tasks. Use TaskUpdate to claim tasks (set owner to your name) and mark them completed. Message teammates by name via SendMessage when you need their input.
-
-**Startup**
-If no tasks are assigned to you, idle silently. Do NOT message Neal to announce yourself — wait for work.
-
-**Domain Context**
-Read `.brains_in_a_hat/domain-config.json` if it exists for project-specific terminology, compliance rules, and patterns.
-
-**Vault Persistence**
-If `~/.brains_in_a_hat/vault/` exists, persist durable artifacts (findings, decisions, reviews, designs) using templates from `$CLAUDE_PLUGIN_ROOT/vault-templates/`. Use Dataview frontmatter (`type`, `project`, `agents`, `date`, `tags`, `status`) and `[[wikilinks]]`. Write to `~/.brains_in_a_hat/vault/` root — all notes flat, categorized by `type:` and `project:` properties. Images go in `attachments/`. Read the relevant template before writing.
+1. Before emitting the TICK prompt, write `state/librarian-pending.<SID>` containing `PRE_HEAD` (current vault HEAD), `PROPOSED_CURSOR` (new line count), `RETRY=0`.
+2. On the next tick, if the sidecar exists:
+   - Vault HEAD advanced → commit cursor, delete sidecar, continue normally.
+   - Vault HEAD unchanged → RETRY++. If RETRY ≥ 3: advance cursor (accepting the loss), escalate Neal, bail. Otherwise re-slice same lines + warn.
+3. Every TICK prompt mandates a commit (even `--allow-empty` for nothing-to-record) and requires Librarian to report the commit SHA to Neal.

@@ -24,6 +24,7 @@ source "${SCRIPT_DIR}/lib-common.sh"
 
 INPUT=$(cat)
 TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null) || TRANSCRIPT=""
+AGENT_TYPE=$(echo "$INPUT" | jq -r '.agent_type // empty' 2>/dev/null) || AGENT_TYPE=""
 
 # How many recent transcript turns to slice (configurable later)
 TURNS_TO_INJECT=${BRAINS_TRANSCRIPT_TURNS:-20}
@@ -48,8 +49,25 @@ LEARNINGS_CONTENT=""
 SHARED_CONTENT=""
 [ -f "$SHARED_LEARNINGS" ] && SHARED_CONTENT=$(head -c 4000 "$SHARED_LEARNINGS") || true
 
+# Build ROSTER block from team config.json
+# Team name follows the hatbrains-<repoKey> convention; look for the most
+# recent config in ~/.claude/teams/ matching that pattern.
+ROSTER_BLOCK=""
+TEAM_NAME="hatbrains-${REPO_KEY}"
+TEAM_CONFIG="${HOME}/.claude/teams/${TEAM_NAME}/config.json"
+if [ -f "$TEAM_CONFIG" ]; then
+  ROSTER_BLOCK=$(jq -r '
+    "--- Team roster: " + .name + " ---\n" +
+    ( [ .members[]
+        | select(.name != "team-lead")
+        | "  " + .name + " (" + (.agentType // "unknown") + ")"
+      ] | join("\n")
+    ) + "\n\nMessaging conventions (CRITICAL — wrong names silently drop messages):\n  - Address the lead as exactly \"team-lead\" (not \"Neal\" — that name is never spawned as a teammate).\n  - Address peers by their exact name above (e.g. \"Librarian\", \"Builder\").\n  - SendMessage only RESUMES an already-spawned teammate; it does NOT spawn one.\n    Messaging a name that has never been spawned silently drops the message.\n  - Peer DMs are allowed for clarification (e.g. Scout→Librarian: \"do we have a cached result for X?\").\n  - State-changing actions (vault writes, repo commits, task ownership) stay in your own lane."
+  ' "$TEAM_CONFIG" 2>/dev/null) || ROSTER_BLOCK=""
+fi
+
 # If nothing to inject, exit clean
-if [ -z "$TRANSCRIPT_SLICE" ] && [ -z "$LEARNINGS_CONTENT" ] && [ -z "$SHARED_CONTENT" ]; then
+if [ -z "$TRANSCRIPT_SLICE" ] && [ -z "$LEARNINGS_CONTENT" ] && [ -z "$SHARED_CONTENT" ] && [ -z "$ROSTER_BLOCK" ]; then
   exit 0
 fi
 
@@ -72,6 +90,8 @@ ${LEARNINGS_CONTENT:-<no learnings yet>}
 --- <${PROJECT_GROUP}--shared--learnings.md> ---
 ${SHARED_CONTENT:-<no shared learnings yet>}
 
+${ROSTER_BLOCK:+${ROSTER_BLOCK}
+}
 === END MAIN THREAD CONTEXT ===
 EOF
 )
