@@ -39,10 +39,10 @@ EOF
 
 | Component | Count | Description |
 |-----------|-------|-------------|
-| Agents | 4 | Librarian, Critic, Builder, Scout (plus Neal in the main thread) |
-| Commands | 1 | `/assemble` — the only command the user types. Neal handles all other intents (review, ship, research, implement, recall) by routing internally. |
+| Agents | 5 | Dewey (Librarian), Ebert (Critic), Marco (Scout), Wright (Architect — read-only), Ada/Grace/Shannon (Builders — on-demand). Plus Neal in the main thread. |
+| Commands | 1 | `/assemble` — the only command the user types. Neal handles all other intents (review, ship, research, implement, design, recall) by routing internally. |
 | Hooks | 6 | session bootstrap + per-turn context injection + idle-tick + allowlist enforcement |
-| Scripts | 1 | `vault-init.sh` (detect/init/clone vault repo) |
+| Scripts | 2 | `vault-init.sh` (detect/init/clone vault repo); `file-plugin-issue.sh` (file issues on the plugin repo from any project) |
 
 ## How it works
 
@@ -82,9 +82,10 @@ Open Obsidian to the vault root and you see one `index.md` with Dataview-driven 
 ## Documentation map
 
 - [`brains-in-a-hat/CLAUDE.md`](./brains-in-a-hat/CLAUDE.md) — architecture and hook lifecycle (source of truth for behavior)
-- [`brains-in-a-hat/agents/`](./brains-in-a-hat/agents/) — the four teammate persona files
+- [`brains-in-a-hat/agents/`](./brains-in-a-hat/agents/) — the five teammate persona files (librarian, critic, scout, architect, builder)
 - [`brains-in-a-hat/hooks/neal-persona.md`](./brains-in-a-hat/hooks/neal-persona.md) — Neal's full prompt (orchestrator + meta-analyst)
 - [`brains-in-a-hat/scripts/vault-init.sh`](./brains-in-a-hat/scripts/vault-init.sh) — vault bootstrap helper
+- [`brains-in-a-hat/scripts/file-plugin-issue.sh`](./brains-in-a-hat/scripts/file-plugin-issue.sh) — file issues on the plugin repo from any project (used by Builders via `UPSTREAM-ISSUE-REQUEST:` sentinel)
 
 ## Recommended GitHub repo topics
 

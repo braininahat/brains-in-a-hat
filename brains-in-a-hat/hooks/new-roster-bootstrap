@@ -5,10 +5,12 @@
 # On the first prompt of a session where .brains_in_a_hat/project.json has
 # {"newRoster": true}, emit an additionalContext block instructing Neal to:
 #   1. TeamCreate hatbrains-<repoKey> (idempotent)
-#   2. Agent(subagent_type=brains-in-a-hat:librarian, name="Librarian",
-#            team_name=..., mode=bypassPermissions, run_in_background=true)
-#   3. Adopt the new-roster operating mode (route by intent, not CODEOWNERS;
-#      delegate to Critic/Builder/Scout on demand)
+#   2. Agent(subagent_type=brains-in-a-hat:librarian, name="Dewey", ...)
+#   3. Agent(subagent_type=brains-in-a-hat:critic,    name="Ebert", ...)
+#   4. Agent(subagent_type=brains-in-a-hat:scout,     name="Marco", ...)
+#   5. Agent(subagent_type=brains-in-a-hat:architect, name="Wright", ...)
+#   6. Adopt the new-roster operating mode (route by intent, not CODEOWNERS;
+#      spawn Builders on-demand when implementation tasks arrive)
 #
 # After firing once per session, the hook writes
 # .brains_in_a_hat/state/new-roster-bootstrapped.<SID> and no-ops on
@@ -62,39 +64,68 @@ TEAM_NAME="hatbrains-${REPO_KEY}"
 read -r -d '' INSTRUCTION <<EOF || true
 NEW-ROSTER BOOTSTRAP (newRoster=true detected in .brains_in_a_hat/project.json):
 
-This session uses the v1.0.0-alpha 5-agent roster — not the legacy 21-agent team.
-Your roster (Neal + 4 teammates):
+This session uses the v1.0.0-alpha roster — not the legacy 21-agent team.
+Your roster (Neal + singletons + on-demand Builders):
   - Neal (you, main thread) — orchestrator + meta-analysis (friction patterns, improvement suggestions)
-  - Librarian — always-on storage/retrieval/curation; owns vault git ops
-  - Critic — on-demand reviewer with lens param (architecture|security|performance|ux|correctness)
-  - Builder — on-demand implementation
-  - Scout — on-demand research with explicit retrieval routing
+  - Dewey (librarian) — always-on storage/retrieval/curation; owns vault git ops
+  - Ebert (critic) — on-demand reviewer with lens param (architecture|security|performance|ux|correctness)
+  - Marco (scout) — on-demand research with explicit retrieval routing
+  - Wright (architect) — on-demand design blueprints + architecture audits; read-only; returns blueprint via SendMessage; Builder implements
+  - Builders (on-demand, spawn when needed): Ada=ML, Grace=infra, Shannon=sci/math/signal; all subagent_type=builder; cap 3 concurrent
 
 Routing is by intent, NOT by file path (no CODEOWNERS).
 
-Spawn the standing teammate now (one-shot, fire-and-exit, run_in_background=true):
+Spawn the 4 singletons now (one-shot, fire-and-exit, run_in_background=true):
 
   TeamCreate(team_name="${TEAM_NAME}")
+
   Agent(
     subagent_type="brains-in-a-hat:librarian",
-    name="Librarian",
+    name="Dewey",
     team_name="${TEAM_NAME}",
     mode="bypassPermissions",
     run_in_background=true,
     prompt="Initial spawn. Pull the vault, load ${REPO_KEY}--learnings.md and ${PROJECT_GROUP}--shared--learnings.md, then idle until the librarian-tick hook re-engages you. Project: projectGroup=${PROJECT_GROUP}, repoKey=${REPO_KEY}, vault=\$BRAINS_VAULT_DIR."
   )
 
-Critic/Builder/Scout are NOT pre-spawned. Spawn them lazily via Agent + SendMessage when a task calls for them.
+  Agent(
+    subagent_type="brains-in-a-hat:critic",
+    name="Ebert",
+    team_name="${TEAM_NAME}",
+    mode="bypassPermissions",
+    run_in_background=true,
+    prompt="Initial spawn on team '${TEAM_NAME}'. Read your persona from brains-in-a-hat/agents/critic.md. You are Ebert. Idle until Neal routes a review task to you via SendMessage."
+  )
+
+  Agent(
+    subagent_type="brains-in-a-hat:scout",
+    name="Marco",
+    team_name="${TEAM_NAME}",
+    mode="bypassPermissions",
+    run_in_background=true,
+    prompt="Initial spawn on team '${TEAM_NAME}'. Read your persona from brains-in-a-hat/agents/scout.md. You are Marco. Idle until Neal routes a research task to you via SendMessage."
+  )
+
+  Agent(
+    subagent_type="brains-in-a-hat:architect",
+    name="Wright",
+    team_name="${TEAM_NAME}",
+    mode="bypassPermissions",
+    run_in_background=true,
+    prompt="Initial spawn on team '${TEAM_NAME}'. Read your persona from brains-in-a-hat/agents/architect.md. You are Wright. Idle until Neal routes a design or blueprint task to you via SendMessage."
+  )
+
+Builders (Ada/Grace/Shannon) are NOT pre-spawned. Spawn them lazily via Agent + SendMessage when an implementation task arrives. Pick the best-fit domain (Ada=ML, Grace=infra, Shannon=sci/math/signal). Cap: 3 concurrent.
 
 Vault state: \$BRAINS_VAULT_DIR (must be a git repo). projectGroup=${PROJECT_GROUP}, repoKey=${REPO_KEY}.
 
-When you reply to the user, briefly acknowledge the new roster is online. Don't list all four teammates — that's noise. Just proceed with the user's request.
+When you reply to the user, briefly acknowledge the team is online. Don't list all teammates — that's noise. Just proceed with the user's request.
 EOF
 
 if [ "$COMPACT_RECOVERING" = "true" ]; then
   INSTRUCTION="${INSTRUCTION}
 
-COMPACTION RECOVERY: this session just resumed after a compaction. Your spawned teammates (Librarian) and any in-flight work may have been compressed away. Re-spawn Librarian per the block above. Ask Librarian for the latest <repoKey>--learnings.md and the most recent entries in <projectGroup>--session-log.md to re-orient."
+COMPACTION RECOVERY: this session just resumed after a compaction. Your spawned teammates and any in-flight work may have been compressed away. Re-spawn the 4 singletons per the block above (Dewey/Ebert/Marco/Wright). Ask Dewey for the latest <repoKey>--learnings.md and the most recent entries in <projectGroup>--session-log.md to re-orient."
 fi
 
 jq -nc --arg ctx "$INSTRUCTION" \
