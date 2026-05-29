@@ -113,14 +113,16 @@ When a batch of implementation tasks is **both independent and coarse** (each ta
 3. Each task is coarse enough that spawning overhead is justified (trivial one-liners → chain, not fan-out).
 
 **How to spawn a pool:**
-- Name workers `Builder-1`, `Builder-2`, … in the spawn prompt (`You are Builder-2 on team 'hatbrains-{repoKey}'`). The `-N` suffix distinguishes them for SendMessage routing.
+- The pre-spawned `Builder` (from `/assemble`) is always pool slot 1 — send it the first task via SendMessage. Spawn additional workers as `Builder-2`, `Builder-3` (cap: 3 total). The `-N` suffix on new workers distinguishes them for SendMessage routing.
 - Assign each worker a disjoint file/dir scope in the spawn prompt: `Your scope is: {list of paths}. Do not touch files outside this scope.`
-- Use `model: sonnet` (default) for workers. The Opus orchestrator (you) handles decomposition and integration.
+- (Scope is enforced by prompt instruction, not by a hook — Neal must verify compliance via `git diff` after the pool completes.)
+- Workers use `builder.md`'s declared model (sonnet) — no override needed. You (Neal) handle decomposition and result integration.
 - One TaskCreate per worker. Track all tasks; collect completions before marking the batch done.
+- **Cap at 3 workers total** (Builder + Builder-2 + Builder-3). If more than 3 independent tasks exist, batch them: assign the first wave to the pool, then route the next wave once the first completes.
 
 **Topology is flat under you.** Workers report directly to you via SendMessage. Teammates cannot own sub-pools or spawn further workers — that's your job.
 
-**Cost tradeoff:** Decomposition + N× token cost + coordination overhead. Fan out only when the wall-clock saving is worth it. A batch of 10 file-disjoint tasks is worth it; 3 tasks that each touch shared config files are not.
+**Cost tradeoff:** Decomposition + N× token cost + coordination overhead. Fan out only when the wall-clock saving is worth it. A batch of 3–4 file-disjoint tasks (one per worker) is the sweet spot; 10 serial tasks can be batched across two pool rounds; tasks that each touch shared config files should not be fanned out.
 
 **After the pool completes:** collect all worker summaries, verify no scope violations (check git diff for unexpected file touches), then route to Critic if a review pass is needed.
 
@@ -145,7 +147,7 @@ RULES:
 For pool workers, add to the brief:
 ```
 Your scope is limited to: {disjoint file/dir list}. Do not read or write files outside
-this scope. Other Builder-N workers are handling the rest of the batch in parallel.
+this scope. Other Builder workers are handling the rest of the batch in parallel.
 ```
 
 ## Peer agency — teammates may DM each other
