@@ -135,6 +135,15 @@ CALLING_PROJECT=$(_calling_project)
 
 EXISTING_NUM=$(_find_duplicate "$TITLE")
 
+# Guard: EXISTING_NUM must be a plain integer; reject anything else (jq
+# parse errors, multi-line output, stray text) to prevent passing garbage
+# to `gh issue comment`.
+if [ -n "$EXISTING_NUM" ] && ! printf '%s' "$EXISTING_NUM" | grep -qE '^[0-9]+$'; then
+  printf 'file-plugin-issue: unexpected dedup result (not an integer): %s — skipping duplicate check\n' \
+    "$EXISTING_NUM" >&2
+  EXISTING_NUM=""
+fi
+
 # ---------- dry-run path -----------------------------------------------------
 
 if [ "$DRY_RUN" = true ]; then

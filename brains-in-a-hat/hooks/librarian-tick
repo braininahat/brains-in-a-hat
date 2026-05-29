@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# librarian-tick — TeammateIdle hook for Librarian (new roster, opt-in)
+# librarian-tick — TeammateIdle hook for Dewey (Librarian, new roster, opt-in)
 #
-# Fires when ANY teammate is about to go idle. We filter for Librarian
-# (the only always-on teammate) and re-engage it via the documented
-# TeammateIdle re-engagement mechanism:
+# Fires when ANY teammate is about to go idle. We filter for Dewey
+# (the only always-on teammate, spawn name="Dewey") and re-engage it via the
+# documented TeammateIdle re-engagement mechanism:
 #
 #   JSON on stdout + exit 0:
 #     {"continue":false,"stopReason":"...","hookSpecificOutput":
@@ -18,7 +18,7 @@
 #  symptom.)
 #
 # Bails (plain exit 0, no stdout) when:
-#   - the idling teammate is not Librarian
+#   - the idling teammate is not Dewey (Librarian)
 #   - no transcript path / transcript not readable
 #   - no new transcript turns to process (and no pending sidecar)
 #
@@ -62,8 +62,8 @@ AGENT_NAME=$(echo "$INPUT" | jq -r '.agent_name // empty' 2>/dev/null) || AGENT_
 TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null) || TRANSCRIPT=""
 SID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SID=""
 
-# Bail: not Librarian → exit 0 silently (let teammate idle normally)
-[ "$AGENT_NAME" = "Librarian" ] || exit 0
+# Bail: not Dewey (Librarian) → exit 0 silently (let teammate idle normally)
+[ "$AGENT_NAME" = "Dewey" ] || exit 0
 
 # Bail: no transcript path → can't process
 [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] || exit 0
@@ -79,7 +79,7 @@ CURSOR=0
 
 TOTAL_LINES=$(wc -l < "$TRANSCRIPT" 2>/dev/null || echo 0)
 
-# ── Receipt check: did Librarian actually commit last tick? ────────────
+# ── Receipt check: did Dewey actually commit last tick? ───────────────
 if [ -f "$PENDING_FILE" ]; then
   PRE_HEAD=""
   PROPOSED_CURSOR=""
@@ -113,7 +113,7 @@ if [ -f "$PENDING_FILE" ]; then
       rm -f "$PENDING_FILE"
       ESCALATION_TMP=$(mktemp)
       cat > "$ESCALATION_TMP" <<ESCEOF
-ESCALATION: Librarian failed to commit to the vault after ${MAX_RETRIES} consecutive ticks. Lines ${CURSOR}..${PROPOSED_CURSOR} are being skipped to prevent an infinite retry loop — they will NOT be re-processed. Vault HEAD has not advanced from ${PRE_HEAD}. Please inspect Librarian's last output and the vault at $VAULT_DIR — it may be unreachable or have a conflict that needs manual resolution. SendMessage to team-lead to report this.
+ESCALATION: Dewey (Librarian) failed to commit to the vault after ${MAX_RETRIES} consecutive ticks. Lines ${CURSOR}..${PROPOSED_CURSOR} are being skipped to prevent an infinite retry loop — they will NOT be re-processed. Vault HEAD has not advanced from ${PRE_HEAD}. Please inspect Librarian's last output and the vault at $VAULT_DIR — it may be unreachable or have a conflict that needs manual resolution. SendMessage to team-lead to report this.
 ESCEOF
       reengage_file "$ESCALATION_TMP"
     fi
@@ -152,7 +152,7 @@ NEW_TURNS=$((TOTAL_LINES - CURSOR))
 
 # RECORD-REQUEST fast path: if the new slice contains a literal RECORD-REQUEST:
 # token (placed there by Neal via SendMessage), prepend a hard directive so
-# Librarian cannot classify it as noise. Pure bash detection — no NLP.
+# Dewey cannot classify it as noise. Pure bash detection — no NLP.
 RECORD_REQUEST_PREFIX=""
 if [ -f "$TRANSCRIPT" ] && tail -n +"$((CURSOR + 1))" "$TRANSCRIPT" 2>/dev/null | grep -qF 'RECORD-REQUEST:'; then
   RECORD_REQUEST_PREFIX="EXPLICIT RECORD REQUEST detected in this slice — you MUST write and commit it; do not classify as noise. Treat every RECORD-REQUEST: line as a mandatory vault write.

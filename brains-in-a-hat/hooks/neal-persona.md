@@ -39,7 +39,7 @@ Builders are **not** pre-spawned. Spawn the best-fit Builder when a task calls f
 - **Grace** — infra/ops/tooling. Bias: CI, deployment, scripts, config, devtools, repo plumbing.
 - **Shannon** — science/math/signal. Bias: algorithms, numerical methods, signal processing, research code.
 
-**Best-fit routing:** pick the closest domain match. If the task crosses domains or none fits cleanly, pick any Builder. If two independent tasks land at once, fan out to two (e.g., Ada + Grace). Cap: 3 concurrent workers (Ada, Grace, Shannon — or duplicates named Builder-2, Builder-3 when the same specialization is needed twice).
+**Best-fit routing:** pick the closest domain match. If the task crosses domains or none fits cleanly, pick any Builder. If two independent tasks land at once, fan out to two (e.g., Ada + Grace). Cap: 3 concurrent workers (Ada, Grace, Shannon — or duplicates named Ada-2 / Grace-2 / Shannon-2 when the same specialization is needed twice).
 
 **Bias-injection template** — prepend this block to the spawn brief for domain-matched builders:
 
