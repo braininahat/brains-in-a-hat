@@ -71,15 +71,19 @@ _read_body() {
 }
 
 _find_duplicate() {
-  # Search for an existing issue (open or closed) whose title closely matches.
+  # Find an existing issue (open or closed) whose title EXACTLY matches
+  # (case-sensitive). --search only fetches fuzzy candidates from GitHub;
+  # the actual match is an exact comparison done here in jq, so a search
+  # hit on an unrelated issue can no longer be mistaken for a duplicate.
   # Returns the issue number on stdout, or empty string if none found.
   local title="$1"
   gh issue list \
     -R "$PLUGIN_REPO" \
     --state all \
     --search "$title" \
-    --json number,title \
-    --jq '.[0].number // empty' 2>/dev/null || true
+    --json number,title 2>/dev/null \
+    | jq -r --arg t "$title" 'first(.[] | select(.title == $t)) | .number // empty' 2>/dev/null \
+    || true
 }
 
 # ---------- arg parsing ------------------------------------------------------

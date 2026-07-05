@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/new-roster-bootstrap\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "mkdir -p .brains_in_a_hat/state 2>/dev/null; { \"${CLAUDE_PLUGIN_ROOT}/hooks/new-roster-bootstrap\"; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd\" session-start 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "mkdir -p .brains_in_a_hat/state 2>/dev/null; { \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd\" session-start; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{ if ls .brains_in_a_hat/state/active.* &>/dev/null; then printf '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionEnd\",\"additionalContext\":\"Session ending. SendMessage to Librarian: \\\"final tick before session ends — process any remaining transcript turns, commit + push the vault.\\\" Then exit. No retros, no phased ceremonies.\"}}'; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "mkdir -p .brains_in_a_hat/state 2>/dev/null; { if ls .brains_in_a_hat/state/active.* >/dev/null 2>&1; then SESSION=$(ls -t .brains_in_a_hat/state/active.* 2>/dev/null | head -1); SESSION=\"${SESSION##*/active.}\"; jq -nc --arg ts \"$(date -Iseconds)\" --arg session \"$SESSION\" '{ts:$ts,session:$session,event:\"session-end\"}' >> .brains_in_a_hat/state/activity.jsonl; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       }
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{ INPUT=$(cat); SID=$(echo \"$INPUT\" | jq -r '.session_id // empty' 2>/dev/null); mkdir -p .brains_in_a_hat/state; [ -n \"$SID\" ] && touch \".brains_in_a_hat/state/compact-pending.${SID}\"; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "mkdir -p .brains_in_a_hat/state 2>/dev/null; { INPUT=$(cat); SID=$(echo \"$INPUT\" | jq -r '.session_id // empty' 2>/dev/null); [ -n \"$SID\" ] && touch \".brains_in_a_hat/state/compact-pending.${SID}\"; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       }
@@ -50,15 +50,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{ if ls .brains_in_a_hat/state/active.* &>/dev/null; then INPUT=$(cat); AGENT=$(echo \"$INPUT\" | jq -r '.agent_type // \"agent\"'); SESSION=$(ls -t .brains_in_a_hat/state/active.* 2>/dev/null | head -1); SESSION=\"${SESSION##*/active.}\"; jq -nc --arg ts \"$(date -Iseconds)\" --arg agent \"$AGENT\" --arg session \"$SESSION\" '{ts:$ts,agent:$agent,session:$session,event:\"start\",detail:\"spawned\"}' >> .brains_in_a_hat/state/activity.jsonl 2>/dev/null; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "mkdir -p .brains_in_a_hat/state 2>/dev/null; { if ls .brains_in_a_hat/state/active.* >/dev/null 2>&1; then INPUT=$(cat); AGENT=$(echo \"$INPUT\" | jq -r '.agent_type // \"agent\"'); SESSION=$(ls -t .brains_in_a_hat/state/active.* 2>/dev/null | head -1); SESSION=\"${SESSION##*/active.}\"; jq -nc --arg ts \"$(date -Iseconds)\" --arg agent \"$AGENT\" --arg session \"$SESSION\" '{ts:$ts,agent:$agent,session:$session,event:\"start\",detail:\"spawned\"}' >> .brains_in_a_hat/state/activity.jsonl 2>/dev/null; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/inject-context\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
-          },
-          {
-            "type": "command",
-            "command": "{ INPUT=$(cat); ID=$(echo \"$INPUT\" | jq -r '.agent_id // .agent_type // empty' 2>/dev/null); mkdir -p .brains_in_a_hat/state; [ -n \"$ID\" ] && touch \".brains_in_a_hat/state/in-subagent.${ID}\"; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "mkdir -p .brains_in_a_hat/state 2>/dev/null; { \"${CLAUDE_PLUGIN_ROOT}/hooks/inject-context\"; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       }
@@ -69,7 +65,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/librarian-tick\" 2>> .brains_in_a_hat/state/hook-debug.log"
+            "command": "mkdir -p .brains_in_a_hat/state 2>/dev/null; \"${CLAUDE_PLUGIN_ROOT}/hooks/librarian-tick\""
           }
         ]
       }
@@ -80,11 +76,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{ if ls .brains_in_a_hat/state/active.* &>/dev/null; then INPUT=$(cat); AGENT=$(echo \"$INPUT\" | jq -r '.agent_type // \"agent\"'); SESSION=$(ls -t .brains_in_a_hat/state/active.* 2>/dev/null | head -1); SESSION=\"${SESSION##*/active.}\"; jq -nc --arg ts \"$(date -Iseconds)\" --arg agent \"$AGENT\" --arg session \"$SESSION\" '{ts:$ts,agent:$agent,session:$session,event:\"done\",detail:\"completed\"}' >> .brains_in_a_hat/state/activity.jsonl 2>/dev/null; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
-          },
-          {
-            "type": "command",
-            "command": "{ INPUT=$(cat); ID=$(echo \"$INPUT\" | jq -r '.agent_id // .agent_type // empty' 2>/dev/null); [ -n \"$ID\" ] && rm -f \".brains_in_a_hat/state/in-subagent.${ID}\"; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "mkdir -p .brains_in_a_hat/state 2>/dev/null; { if ls .brains_in_a_hat/state/active.* >/dev/null 2>&1; then INPUT=$(cat); AGENT=$(echo \"$INPUT\" | jq -r '.agent_type // \"agent\"'); SESSION=$(ls -t .brains_in_a_hat/state/active.* 2>/dev/null | head -1); SESSION=\"${SESSION##*/active.}\"; jq -nc --arg ts \"$(date -Iseconds)\" --arg agent \"$AGENT\" --arg session \"$SESSION\" '{ts:$ts,agent:$agent,session:$session,event:\"done\",detail:\"completed\"}' >> .brains_in_a_hat/state/activity.jsonl 2>/dev/null; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       }
@@ -95,7 +87,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{ if ls .brains_in_a_hat/state/active.* &>/dev/null; then mkdir -p .brains_in_a_hat/state; INPUT=$(cat); AGENT=$(echo \"$INPUT\" | jq -r '.tool_input.name // .tool_input.subagent_type // \"agent\"'); DESC=$(echo \"$INPUT\" | jq -r '.tool_input.description // \"\"'); SESSION=$(ls -t .brains_in_a_hat/state/active.* 2>/dev/null | head -1); SESSION=\"${SESSION##*/active.}\"; jq -nc --arg ts \"$(date -Iseconds)\" --arg agent \"$AGENT\" --arg detail \"$DESC\" --arg session \"$SESSION\" '{ts:$ts,agent:$agent,session:$session,event:\"spawn\",detail:$detail}' >> .brains_in_a_hat/state/activity.jsonl; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "mkdir -p .brains_in_a_hat/state 2>/dev/null; { if ls .brains_in_a_hat/state/active.* >/dev/null 2>&1; then INPUT=$(cat); AGENT=$(echo \"$INPUT\" | jq -r '.tool_input.name // .tool_input.subagent_type // \"agent\"'); DESC=$(echo \"$INPUT\" | jq -r '.tool_input.description // \"\"'); SESSION=$(ls -t .brains_in_a_hat/state/active.* 2>/dev/null | head -1); SESSION=\"${SESSION##*/active.}\"; jq -nc --arg ts \"$(date -Iseconds)\" --arg agent \"$AGENT\" --arg detail \"$DESC\" --arg session \"$SESSION\" '{ts:$ts,agent:$agent,session:$session,event:\"spawn\",detail:$detail}' >> .brains_in_a_hat/state/activity.jsonl; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       },
@@ -104,7 +96,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/capture-research\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "mkdir -p .brains_in_a_hat/state 2>/dev/null; { \"${CLAUDE_PLUGIN_ROOT}/hooks/capture-research\"; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       },
@@ -113,7 +105,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/capture-research\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "mkdir -p .brains_in_a_hat/state 2>/dev/null; { \"${CLAUDE_PLUGIN_ROOT}/hooks/capture-research\"; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       },
@@ -122,7 +114,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/capture-research\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "mkdir -p .brains_in_a_hat/state 2>/dev/null; { \"${CLAUDE_PLUGIN_ROOT}/hooks/capture-research\"; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       },
@@ -131,7 +123,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/capture-research\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "mkdir -p .brains_in_a_hat/state 2>/dev/null; { \"${CLAUDE_PLUGIN_ROOT}/hooks/capture-research\"; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       }
@@ -142,16 +134,16 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/enforce-neal-allowlist\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "mkdir -p .brains_in_a_hat/state 2>/dev/null; { \"${CLAUDE_PLUGIN_ROOT}/hooks/enforce-lanes\"; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       },
       {
-        "matcher": "",
+        "matcher": "SendMessage",
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/enforce-teammate-lanes\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "mkdir -p .brains_in_a_hat/state 2>/dev/null; { \"${CLAUDE_PLUGIN_ROOT}/hooks/guard-sendmessage\"; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       },
@@ -160,7 +152,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{ INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r '.tool_input.file_path // empty'); PLUGIN_ROOT=\"${CLAUDE_PLUGIN_ROOT:-__unset__}\"; if [ \"$PLUGIN_ROOT\" != \"__unset__\" ] && echo \"$FILE\" | grep -qF \"$PLUGIN_ROOT\"; then jq -nc '{hookSpecificOutput:{hookEventName:\"PreToolUse\",permissionDecision:\"deny\"},systemMessage:\"Cannot modify plugin files from within an agent.\"}'; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "mkdir -p .brains_in_a_hat/state 2>/dev/null; { INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r '.tool_input.file_path // empty'); PLUGIN_ROOT=\"${CLAUDE_PLUGIN_ROOT:-__unset__}\"; if [ \"$PLUGIN_ROOT\" != \"__unset__\" ] && echo \"$FILE\" | grep -qF \"$PLUGIN_ROOT\"; then jq -nc '{hookSpecificOutput:{hookEventName:\"PreToolUse\",permissionDecision:\"deny\"},systemMessage:\"Cannot modify plugin files from within an agent.\"}'; fi; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       },
@@ -169,7 +161,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/vault-check\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "mkdir -p .brains_in_a_hat/state 2>/dev/null; { \"${CLAUDE_PLUGIN_ROOT}/hooks/vault-check\"; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       },
@@ -178,7 +170,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/vault-check\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "mkdir -p .brains_in_a_hat/state 2>/dev/null; { \"${CLAUDE_PLUGIN_ROOT}/hooks/vault-check\"; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       },
@@ -187,7 +179,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/vault-check\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "mkdir -p .brains_in_a_hat/state 2>/dev/null; { \"${CLAUDE_PLUGIN_ROOT}/hooks/vault-check\"; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       },
@@ -196,7 +188,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/vault-check\" 2>> .brains_in_a_hat/state/hook-debug.log || true"
+            "command": "mkdir -p .brains_in_a_hat/state 2>/dev/null; { \"${CLAUDE_PLUGIN_ROOT}/hooks/vault-check\"; } 2>> .brains_in_a_hat/state/hook-debug.log || true"
           }
         ]
       }

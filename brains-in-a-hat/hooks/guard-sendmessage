@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+#
+# guard-sendmessage — PreToolUse[SendMessage] hook (F8)
+#
+# Upstream bug #25135: SendMessage to a recipient that isn't a live member
+# of the session's implicit team returns {success:true} but silently
+# drops the message. This is what makes lazy spawning safe: instead of
+# eagerly spawning the whole roster, Neal spawns a teammate on first
+# matching intent and this hook catches any SendMessage sent before that
+# spawn (or to a typo'd/retired name) with an actionable spawn hint,
+# rather than letting the message vanish.
+#
+# Team config lives at ~/.claude/teams/session-<first 8 of session_id>/config.json
+# (implicit team, no TeamCreate/TeamDelete in the current harness).
+#
+# Output protocol: allow = exit 0 with no stdout. Deny = single-line JSON
+# {"decision":"block","reason":"..."} on stdout, exit 0. Malformed stdin,
+# a missing session_id, or a missing team config all fail OPEN (exit 0) —
+# there's nothing to validate against yet.
+
+set -euo pipefail
+
+# ── Gate: plugin active in this session ─────────────────────────────────
+ls .brains_in_a_hat/state/active.* >/dev/null 2>&1 || exit 0
+
+INPUT=$(cat) || exit 0
+TO=$(printf '%s' "$INPUT" | jq -r '.tool_input.to // empty' 2>/dev/null) || TO=""
+[ -n "$TO" ] || exit 0
+
+# The main thread itself is always reachable.
+case "$TO" in
+  team-lead|main) exit 0 ;;
+esac
+
+SID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SID=""
+[ -n "$SID" ] || exit 0
+
+SID8="${SID:0:8}"
+CONFIG="${HOME}/.claude/teams/session-${SID8}/config.json"
+
+# No team config on disk yet — nothing spawned, nothing to validate
+# against. Fail open rather than blocking the very first SendMessage.
+[ -f "$CONFIG" ] || exit 0
+
+# index() returns the array position of $TO, or null if absent — using
+# index rather than a boolean comparison means member 0 (index 0) still
+# reads as a genuine match ("0" != "null").
+MATCH=$(jq -r --arg to "$TO" '[.members[]?.name] | index($to)' "$CONFIG" 2>/dev/null) || MATCH="null"
+if [ "$MATCH" != "null" ] && [ -n "$MATCH" ]; then
+  exit 0
+fi
+
+MEMBERS=$(jq -r '[.members[]?.name] | join(", ")' "$CONFIG" 2>/dev/null) || MEMBERS=""
+REASON="SendMessage to '${TO}' would be silently dropped — no such teammate in this session's team (upstream bug #25135). Live members: ${MEMBERS:-<none>}. Lazy-spawn it first via Agent(name=\"${TO}\", ...) then re-send."
+jq -nc --arg r "$REASON" '{decision:"block",reason:$r}'
+exit 0

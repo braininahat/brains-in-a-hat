@@ -1,132 +1,185 @@
 #!/usr/bin/env bash
 #
-# new-roster-bootstrap — UserPromptSubmit hook for the new 5-agent roster.
+# new-roster-bootstrap — UserPromptSubmit hook.
 #
-# On the first prompt of a session where .brains_in_a_hat/project.json has
-# {"newRoster": true}, emit an additionalContext block instructing Neal to:
-#   1. TeamCreate hatbrains-<repoKey> (idempotent)
-#   2. Agent(subagent_type=brains-in-a-hat:librarian, name="Dewey", ...)
-#   3. Agent(subagent_type=brains-in-a-hat:critic,    name="Ebert", ...)
-#   4. Agent(subagent_type=brains-in-a-hat:scout,     name="Marco", ...)
-#   5. Agent(subagent_type=brains-in-a-hat:architect, name="Wright", ...)
-#   6. Adopt the new-roster operating mode (route by intent, not CODEOWNERS;
-#      spawn Builders on-demand when implementation tasks arrive)
+# Runs on every user prompt. Most of what it does only fires once per
+# session (or once per recovery event); one piece — the librarian nudge —
+# runs on every prompt regardless.
 #
-# After firing once per session, the hook writes
-# .brains_in_a_hat/state/new-roster-bootstrapped.<SID> and no-ops on
-# subsequent prompts.
+#   0. Kill switch: BRAINS_DISABLED=1 or project.json {"disabled":true} →
+#      exit 0 before anything else is written. Every downstream hook gates
+#      on the active.<SID> marker this hook would otherwise write, so this
+#      one check disables the whole plugin for the session.
+#   1. First prompt of the session (or first prompt after a resume/compact
+#      recovery): emit the lazy-roster orientation — real names, roles,
+#      spawn-on-first-intent rules, vault preflight — and write the
+#      bootstrap marker + active.<SID> marker so it doesn't fire again.
+#   2. Recovery banner: if a resume/compact marker is pending, append a
+#      note that prior teammates are dead and will lazy-respawn, and that
+#      the task list (TaskList) is the durable record across the gap.
+#   3. Librarian nudge (every prompt, independent of #1/#2): if the vault
+#      is git-backed and the current transcript has accumulated more than
+#      BRAINS_TICK_NUDGE_LINES unprocessed lines since Dewey's last cursor,
+#      emit a one-line reminder to wake Dewey. This exists because
+#      TeammateIdle only fires on an idle *transition* and never re-fires
+#      while already idle — an idle Dewey can otherwise starve indefinitely.
+#   4. Escalation surfacing: any state/librarian-escalation.* file (written
+#      by librarian-tick when a tick retry ceiling is hit) is read, appended,
+#      and deleted here — this is the only place tick failures reach Neal.
 #
-# Bails (no-op) when:
-#   - newRoster flag isn't set → falls through to existing /assemble flow
-#   - already bootstrapped this session (marker exists)
+# Nothing is spawned by this hook. It only emits instructions; Neal spawns
+# teammates lazily via Agent(...) the first time a matching intent arrives.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-source "${SCRIPT_DIR}/lib-common.sh"
+# Guarded source (#57 failure class): unguarded, a missing/broken lib would
+# crash under `set -e` — and since hooks.json wraps this hook in `|| true`,
+# that crash is swallowed BEFORE active.<SID> is ever written, so the whole
+# plugin goes inert for the session with zero signal to anyone. Bail clean
+# instead, with a debug-log breadcrumb (never stderr/stdout — this hook's
+# only legitimate output is the additionalContext JSON at the very end).
+source "${SCRIPT_DIR}/lib-research.sh" 2>/dev/null || true   # also sources lib-common.sh (VAULT_DIR, derive_project_*, vault_is_git_repo)
+if ! command -v derive_project_key >/dev/null 2>&1; then
+  { mkdir -p .brains_in_a_hat/state 2>/dev/null && printf '%s new-roster-bootstrap: lib-research.sh failed to load — bailing clean\n' "$(date -Iseconds 2>/dev/null || date)" >> .brains_in_a_hat/state/hook-debug.log; } 2>/dev/null || true
+  exit 0
+fi
+
+# ── 0. Kill switch — checked before any state is written ──────────────────
+if [ "${BRAINS_DISABLED:-}" = "1" ]; then
+  exit 0
+fi
+if [ "$(_project_json_get disabled 2>/dev/null || true)" = "true" ]; then
+  exit 0
+fi
 
 INPUT=$(cat)
 SID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SID=""
+TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null) || TRANSCRIPT=""
 
-# Bail: no session id
+# Bail: no session id (can't key any of the per-session markers below).
 [ -n "$SID" ] || exit 0
 
-mkdir -p .brains_in_a_hat/state
+STATE_DIR=".brains_in_a_hat/state"
+mkdir -p "$STATE_DIR"
 
-# Check for a pending compaction recovery (set by PreCompact hook). If set,
-# we still emit the bootstrap block — but with extra compaction-recovery
-# instructions appended.
-COMPACT_RECOVERING=false
-for m in .brains_in_a_hat/state/compact-pending.*; do
+MSG=""
+append_section() {
+  # Appends a section to MSG with a blank-line separator, but only if MSG
+  # already has content — avoids leading blank lines when the bootstrap
+  # block is skipped and the nudge/escalation is the only thing to say.
+  if [ -n "$MSG" ]; then
+    MSG="${MSG}
+
+$1"
+  else
+    MSG="$1"
+  fi
+}
+
+# ── 1 + 2. Bootstrap-once orientation + recovery banner ────────────────────
+RECOVERING=false
+for m in "$STATE_DIR"/recovery-pending.* "$STATE_DIR"/compact-pending.*; do
   [ -f "$m" ] || continue
-  if [ "${m##*/compact-pending.}" = "$SID" ]; then
-    COMPACT_RECOVERING=true
+  base="${m##*/}"
+  suffix="${base#*.}"
+  if [ "$suffix" = "$SID" ]; then
+    RECOVERING=true
     rm -f "$m"
-    break
   fi
 done
 
-# Bail: already bootstrapped this session (unless we just detected a
-# compaction event, which is reason to re-emit the orientation).
-MARKER=".brains_in_a_hat/state/new-roster-bootstrapped.${SID}"
-if [ -f "$MARKER" ] && [ "$COMPACT_RECOVERING" = "false" ]; then
-  exit 0
+MARKER="${STATE_DIR}/new-roster-bootstrapped.${SID}"
+BOOTSTRAP_NEEDED=true
+if [ -f "$MARKER" ] && [ "$RECOVERING" = "false" ]; then
+  BOOTSTRAP_NEEDED=false
 fi
-touch "$MARKER"
 
-# Set active marker so other hooks know team is active
-echo "active" > ".brains_in_a_hat/state/active.${SID}"
+if [ "$BOOTSTRAP_NEEDED" = "true" ]; then
+  touch "$MARKER"
+  echo "active" > "${STATE_DIR}/active.${SID}"
 
-REPO_KEY=$(derive_project_key)
-PROJECT_GROUP=$(derive_project_group)
-TEAM_NAME="hatbrains-${REPO_KEY}"
+  REPO_KEY=$(derive_project_key)
+  PROJECT_GROUP=$(derive_project_group)
 
-read -r -d '' INSTRUCTION <<EOF || true
-NEW-ROSTER BOOTSTRAP (newRoster=true detected in .brains_in_a_hat/project.json):
+  if vault_is_git_repo; then
+    VAULT_LINE="Vault: ${VAULT_DIR} (git-backed). Dewey is available — spawn on first cross-repo/decision/journal intent."
+  else
+    VAULT_LINE="Vault not initialized: Dewey, the session journal, and the research cache are disabled this session. Per-repo memory still fully works via harness project memory (no setup needed). To enable the vault, run scripts/vault-init.sh from the plugin directory. Do NOT spawn Dewey until that's done."
+  fi
 
-This session uses the v1.0.0-alpha roster — not the legacy 21-agent team.
-Your roster (Neal + singletons + on-demand Builders):
-  - Neal (you, main thread) — orchestrator + meta-analysis (friction patterns, improvement suggestions)
-  - Dewey (librarian) — always-on storage/retrieval/curation; owns vault git ops
-  - Ebert (critic) — on-demand reviewer with lens param (architecture|security|performance|ux|correctness)
-  - Marco (scout) — on-demand research with explicit retrieval routing
-  - Wright (architect) — on-demand design blueprints + architecture audits; read-only; returns blueprint via SendMessage; Builder implements
-  - Builders (on-demand, spawn when needed): Ada=ML, Grace=infra, Shannon=sci/math/signal; all subagent_type=builder; cap 3 concurrent
+  read -r -d '' ORIENTATION <<EOF || true
+ORIENTATION (brains-in-a-hat — lazy roster; adopt the Neal persona):
 
-Routing is by intent, NOT by file path (no CODEOWNERS).
+Every teammate is lazy — nobody is spawned upfront. Spawn a singleton the
+FIRST time a matching intent arrives, via Agent(name="<RealName>",
+subagent_type="brains-in-a-hat:<role>", ...); SendMessage("<RealName>", ...)
+resumes it thereafter — it does not spawn one. There is no TeamCreate and no
+team_name anywhere; the session's implicit team is all there is.
 
-Spawn the 4 singletons now (one-shot, fire-and-exit, run_in_background=true):
+  - Dewey   (librarian, brains-in-a-hat:librarian, model=sonnet) — storage/
+    retrieval/curation of the global vault (shared learnings, decisions,
+    wiki, session journal, research cache).
+  - Ebert   (critic,    brains-in-a-hat:critic)    — review with a lens
+    (architecture|security|performance|ux|correctness) once a diff exists.
+  - Marco   (scout,     brains-in-a-hat:scout)     — external research with
+    explicit retrieval routing.
+  - Wright  (architect, brains-in-a-hat:architect) — read-only design
+    blueprints/audits when there's no diff yet; a Builder implements.
+  - Ada / Grace / Shannon (builder, brains-in-a-hat:builder) — on-demand
+    implementation. ML/infra/sci-math is a naming convention, not a
+    different lane. Cap 3 concurrent. Pick the model per spawn (haiku for
+    mechanical spec-complete work, sonnet default, session model for
+    judgment-heavy or cross-cutting work) — see neal-persona for the rule.
 
-  TeamCreate(team_name="${TEAM_NAME}")
+Routing is by intent, not file path.
 
-  Agent(
-    subagent_type="brains-in-a-hat:librarian",
-    name="Dewey",
-    team_name="${TEAM_NAME}",
-    mode="bypassPermissions",
-    run_in_background=true,
-    prompt="Initial spawn. Pull the vault, load ${REPO_KEY}--learnings.md and ${PROJECT_GROUP}--shared--learnings.md, then idle until the librarian-tick hook re-engages you. Project: projectGroup=${PROJECT_GROUP}, repoKey=${REPO_KEY}, vault=\$BRAINS_VAULT_DIR."
-  )
+${VAULT_LINE}
 
-  Agent(
-    subagent_type="brains-in-a-hat:critic",
-    name="Ebert",
-    team_name="${TEAM_NAME}",
-    mode="bypassPermissions",
-    run_in_background=true,
-    prompt="Initial spawn on team '${TEAM_NAME}'. Read your persona from brains-in-a-hat/agents/critic.md. You are Ebert. Idle until Neal routes a review task to you via SendMessage."
-  )
+projectGroup=${PROJECT_GROUP}, repoKey=${REPO_KEY}.
 
-  Agent(
-    subagent_type="brains-in-a-hat:scout",
-    name="Marco",
-    team_name="${TEAM_NAME}",
-    mode="bypassPermissions",
-    run_in_background=true,
-    prompt="Initial spawn on team '${TEAM_NAME}'. Read your persona from brains-in-a-hat/agents/scout.md. You are Marco. Idle until Neal routes a research task to you via SendMessage."
-  )
-
-  Agent(
-    subagent_type="brains-in-a-hat:architect",
-    name="Wright",
-    team_name="${TEAM_NAME}",
-    mode="bypassPermissions",
-    run_in_background=true,
-    prompt="Initial spawn on team '${TEAM_NAME}'. Read your persona from brains-in-a-hat/agents/architect.md. You are Wright. Idle until Neal routes a design or blueprint task to you via SendMessage."
-  )
-
-Builders (Ada/Grace/Shannon) are NOT pre-spawned. Spawn them lazily via Agent + SendMessage when an implementation task arrives. Pick the best-fit domain (Ada=ML, Grace=infra, Shannon=sci/math/signal). Cap: 3 concurrent.
-
-Vault state: \$BRAINS_VAULT_DIR (must be a git repo). projectGroup=${PROJECT_GROUP}, repoKey=${REPO_KEY}.
-
-When you reply to the user, briefly acknowledge the team is online. Don't list all teammates — that's noise. Just proceed with the user's request.
+When you reply to the user, don't recite this roster back to them — just
+proceed with their request.
 EOF
 
-if [ "$COMPACT_RECOVERING" = "true" ]; then
-  INSTRUCTION="${INSTRUCTION}
+  if [ "$RECOVERING" = "true" ]; then
+    ORIENTATION="${ORIENTATION}
 
-COMPACTION RECOVERY: this session just resumed after a compaction. Your spawned teammates and any in-flight work may have been compressed away. Re-spawn the 4 singletons per the block above (Dewey/Ebert/Marco/Wright). Ask Dewey for the latest <repoKey>--learnings.md and the most recent entries in <projectGroup>--session-log.md to re-orient."
+RECOVERY: this session just resumed (or recovered from a compaction). Any
+teammates spawned before that point are dead — they will lazy-respawn on
+next use, same as a normal first spawn. The task list is durable across
+this gap: run TaskList first to see what was in flight before continuing."
+  fi
+
+  MSG="$ORIENTATION"
 fi
 
-jq -nc --arg ctx "$INSTRUCTION" \
+# ── 3. Librarian nudge (every prompt) ──────────────────────────────────────
+if vault_is_git_repo && [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
+  NUDGE_LINES="${BRAINS_TICK_NUDGE_LINES:-80}"
+  THASH=$(cache_shorthash "$(_sha256 "$TRANSCRIPT")")
+  CURSOR_FILE="${STATE_DIR}/librarian-cursor.${THASH}"
+  CURSOR=0
+  if [ -f "$CURSOR_FILE" ]; then
+    CURSOR=$(sed -n '1p' "$CURSOR_FILE" 2>/dev/null || echo 0)
+    [ -n "$CURSOR" ] || CURSOR=0
+  fi
+  TOTAL_LINES=$(wc -l < "$TRANSCRIPT" 2>/dev/null || echo 0)
+  BACKLOG=$((TOTAL_LINES - CURSOR))
+  if [ "$BACKLOG" -gt "$NUDGE_LINES" ]; then
+    append_section "Dewey backlog: ~${BACKLOG} transcript lines uncurated — wake Dewey so the idle tick can run: SendMessage if he's already spawned, spawn him first if not (brains-in-a-hat:librarian)."
+  fi
+fi
+
+# ── 4. Surface + clear any librarian escalation ────────────────────────────
+for esc in "$STATE_DIR"/librarian-escalation.*; do
+  [ -f "$esc" ] || continue
+  append_section "$(cat "$esc")"
+  rm -f "$esc"
+done
+
+# Nothing to say this prompt — stay silent rather than inject noise.
+[ -n "$MSG" ] || exit 0
+
+jq -nc --arg ctx "$MSG" \
   '{hookSpecificOutput:{hookEventName:"UserPromptSubmit",additionalContext:$ctx}}'
