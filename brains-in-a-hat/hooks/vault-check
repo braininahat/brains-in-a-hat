@@ -22,6 +22,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "${SCRIPT_DIR}/lib-research.sh"  # also sources lib-common.sh
 
+# ── Gate: vault must exist (issue #56 S5) ──────────────────────────────
+# Without a vault there's no cache to hit — nothing to advise on.
+vault_is_git_repo || exit 0
+
 # ── Read hook input ────────────────────────────────────────────────────
 INPUT=$(cat)
 TOOL_NAME=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null) || TOOL_NAME=""

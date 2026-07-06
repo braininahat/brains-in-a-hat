@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 #
-# session-start — SessionStart hook for brains-in-a-hat (v1.0.0-alpha onward)
+# session-start — SessionStart hook for brains-in-a-hat
 #
 # Minimal:
-#   - Bootstrap .brains_in_a_hat/state/ directory.
-#   - Clean stale per-session markers from previous sessions.
-#   - On compact-source sessions, write compact-pending marker so the next
-#     UserPromptSubmit can emit a recovery hint via new-roster-bootstrap.
+#   - Bootstrap .brains_in_a_hat/state/ directory + .gitignore.
+#   - Reap stale markers, by age only — never by "liveness" (session_id is
+#     not a PID; `kill -0 <session-uuid>` always fails, so the old check
+#     reaped every OTHER session's active marker on every launch).
+#   - On resume/compact sources, write recovery-pending.<SID> so the next
+#     UserPromptSubmit (new-roster-bootstrap) can emit a recovery banner.
 #
-# Does NOT inject persona, gather context, create CODEOWNERS, set up
-# vault-templates, or migrate legacy state. The new roster handles
-# orientation via new-roster-bootstrap on the first user prompt; the vault
-# is the user's own private git repo set up via scripts/vault-init.sh.
+# Does NOT inject persona, gather context, create CODEOWNERS, or migrate
+# legacy state. new-roster-bootstrap handles orientation on the first user
+# prompt; the vault is the user's own private git repo (scripts/vault-init.sh).
 
 set -euo pipefail
 
@@ -19,41 +20,67 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "${SCRIPT_DIR}/lib-common.sh"
 
 STATE_DIR=".brains_in_a_hat/state"
+mkdir -p "$STATE_DIR"
 
 INPUT=$(cat)
 SOURCE=$(echo "$INPUT" | jq -r '.source // empty' 2>/dev/null) || SOURCE=""
 SID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SID=""
 
-mkdir -p "$STATE_DIR"
-
-# Clean per-session markers that aren't ours (stale from previous runs).
-# Pattern: <name>.<SID> where SID is encoded in filename.
-for marker in "$STATE_DIR"/active.* \
-              "$STATE_DIR"/new-roster-bootstrapped.* \
-              "$STATE_DIR"/in-subagent.* \
-              "$STATE_DIR"/librarian-cursor.*; do
-  [ -f "$marker" ] || continue
-  marker_sid="${marker##*.}"
-  if [ "$marker_sid" != "$SID" ]; then
-    # Don't reap active.<SID> from another concurrent live session; check pid liveness.
-    if [[ "$marker" == */active.* ]]; then
-      kill -0 "$marker_sid" 2>/dev/null || rm -f "$marker"
-    else
-      rm -f "$marker"
+# ── Age-based marker reaping ──────────────────────────────────────────────
+# reap_stale <glob-prefix> <max-age-minutes>
+#   - Never touches a marker whose suffix matches our own SID (a session
+#     legitimately re-running SessionStart, e.g. on compact, shouldn't lose
+#     the marker it just wrote moments ago).
+#   - Everything else is reaped purely by mtime. This replaces `kill -0` on
+#     what is a session UUID, not a PID (finding 7).
+reap_stale() {
+  local prefix="$1" max_age_min="$2" f suffix
+  for f in "$STATE_DIR"/"${prefix}".*; do
+    [ -e "$f" ] || continue
+    suffix="${f##*.}"
+    if [ -n "$SID" ] && [ "$suffix" = "$SID" ]; then
+      continue
     fi
-  fi
+    if find "$f" -mmin "+${max_age_min}" -print -quit 2>/dev/null | grep -q .; then
+      rm -f "$f"
+    fi
+  done
+}
+
+# Session-keyed markers: another session is almost certainly done after 24h.
+for prefix in active new-roster-bootstrapped compact-pending recovery-pending; do
+  reap_stale "$prefix" 1440
 done
 
-# Stale compact-pending markers from other sessions
-for marker in "$STATE_DIR"/compact-pending.*; do
-  [ -f "$marker" ] || continue
-  [ "${marker##*/compact-pending.}" = "$SID" ] || rm -f "$marker"
+# Librarian state is keyed by transcript hash (not session id) and is meant
+# to survive across sessions/resumes so a later session can still confirm or
+# sweep a prior tick. Only age-reap at 7 days to bound growth from truly
+# abandoned transcripts.
+for prefix in librarian-cursor librarian-pending librarian-noop; do
+  reap_stale "$prefix" 10080
 done
 
-# If we're resuming from a compaction, mark this session for recovery
-if [ "$SOURCE" = "compact" ] && [ -n "$SID" ]; then
-  touch "${STATE_DIR}/compact-pending.${SID}"
+# If we're resuming (source=resume) or recovering from a compaction
+# (source=compact), mark this session for recovery. new-roster-bootstrap
+# reads this (or the legacy compact-pending.<SID> written by PreCompact) on
+# the first prompt and emits a recovery banner.
+if [ -n "$SID" ] && { [ "$SOURCE" = "resume" ] || [ "$SOURCE" = "compact" ]; }; then
+  touch "${STATE_DIR}/recovery-pending.${SID}"
 fi
 
-# No output — the new-roster-bootstrap hook handles orientation on the
+# ── Bootstrap .gitignore for the state dir (idempotent) ───────────────────
+GITIGNORE=".brains_in_a_hat/.gitignore"
+if [ ! -f "$GITIGNORE" ]; then
+  cat > "$GITIGNORE" <<'EOF'
+# Ephemeral runtime state — recreated each session, never committed.
+state/
+*.log
+
+# project.json IS tracked (repo-committed project keying); ensure it's never
+# accidentally ignored if a glob above gets generalized later.
+!project.json
+EOF
+fi
+
+# No stdout — the new-roster-bootstrap hook handles orientation on the
 # first user prompt of the session.

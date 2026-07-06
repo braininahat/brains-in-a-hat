@@ -1,21 +1,19 @@
 #!/usr/bin/env bash
 #
-# inject-context — SubagentStart hook for the new roster (opt-in)
+# inject-context — SubagentStart hook.
 #
 # When a teammate spawns, inject:
-#   1. The last N user/assistant turns from the main thread transcript
-#      (so teammates aren't blind to what you and Neal just said).
-#   2. The active <repoKey>--learnings.md frontmatter + body
-#      (so teammates apply learned rules from prior sessions).
-#   3. The active <projectGroup>--shared--learnings.md (cross-repo context).
-#
-# This is the user-asked-for "main thread should always be available"
-# behaviour — implemented by reading transcript_path from the hook input
-# and emitting it as additionalContext on the spawn.
-#
-# Bails (no-op + lets existing inject-subagent-context handle the spawn)
-# when newRoster flag is not set in project.json. Old roster keeps using
-# the existing inject-subagent-context flow.
+#   1. The last N user/assistant turns from the main-thread transcript
+#      (so teammates aren't blind to what the user and team-lead just said).
+#   2. A ROSTER block built from this session's implicit team config, so a
+#      teammate knows who else is live and how to address them.
+#   3. A pointer into harness-native project memory (MEMORY.md), which is
+#      where per-repo learnings now live (no more <repoKey>--learnings.md
+#      in the vault — that duplication is gone).
+#   4. The vault's <projectGroup>--shared--learnings.md, if this repo
+#      belongs to a group and the file exists (cross-repo context only;
+#      never injected for the "_solo" sentinel group, since there's no
+#      shared file to leak between unrelated ungrouped repos).
 
 set -euo pipefail
 
@@ -24,7 +22,7 @@ source "${SCRIPT_DIR}/lib-common.sh"
 
 INPUT=$(cat)
 TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null) || TRANSCRIPT=""
-AGENT_TYPE=$(echo "$INPUT" | jq -r '.agent_type // empty' 2>/dev/null) || AGENT_TYPE=""
+SID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SID=""
 
 # How many recent transcript turns to slice (configurable later)
 TURNS_TO_INJECT=${BRAINS_TRANSCRIPT_TURNS:-20}
@@ -32,51 +30,76 @@ TURNS_TO_INJECT=${BRAINS_TRANSCRIPT_TURNS:-20}
 # Resolve project keys + vault location
 REPO_KEY=$(derive_project_key)
 PROJECT_GROUP=$(derive_project_group)
-LEARNINGS_FILE="${VAULT_DIR}/${REPO_KEY}--learnings.md"
-SHARED_LEARNINGS="${VAULT_DIR}/${PROJECT_GROUP}--shared--learnings.md"
 
-# Build the transcript slice (last N turns, plain text)
+# ── Build the transcript slice ────────────────────────────────────────────
+# Filter FIRST (select matching records, one full JSON object per line via
+# jq -c so embedded newlines in message text can't confuse a later `tail`),
+# THEN take the last N matching records, THEN extract/format text. Doing it
+# in this order (rather than `tail` on raw file lines) is what makes this
+# "last N turns" instead of "last N raw JSONL records" — tool-call and
+# isMeta records are excluded by the filter, not counted against N.
 TRANSCRIPT_SLICE=""
 if [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
-  TRANSCRIPT_SLICE=$(tail -n "$TURNS_TO_INJECT" "$TRANSCRIPT" 2>/dev/null \
-    | jq -r 'select(.type=="user" or .type=="assistant") | "[\(.type)] \(.content // .text // "")"' 2>/dev/null \
-    | head -c 8000)  # cap injection size
+  TRANSCRIPT_SLICE=$(jq -c 'select(.type=="user" or .type=="assistant") | select(.isMeta != true)' "$TRANSCRIPT" 2>/dev/null \
+    | tail -n "$TURNS_TO_INJECT" \
+    | jq -r '
+        .message.content as $c
+        | (
+            if ($c | type) == "string" then $c
+            else ($c // [] | map(select(.type == "text") | .text) | join("\n"))
+            end
+          ) as $text
+        | select($text != null and $text != "")
+        | "[\(.type)] \($text)"
+      ' 2>/dev/null \
+    | head -c 8000) || TRANSCRIPT_SLICE=""
 fi
 
-# Read learnings files (may not exist on first run)
-LEARNINGS_CONTENT=""
-[ -f "$LEARNINGS_FILE" ] && LEARNINGS_CONTENT=$(head -c 4000 "$LEARNINGS_FILE") || true
-SHARED_CONTENT=""
-[ -f "$SHARED_LEARNINGS" ] && SHARED_CONTENT=$(head -c 4000 "$SHARED_LEARNINGS") || true
+# ── MEMORY.md index (harness-native per-repo memory) ──────────────────────
+# cwd-slug convention: cwd with every "/" and "." replaced by "-" (the
+# leading "/" becomes the leading "-" for free — no separate prefix step).
+CWD_SLUG=$(pwd | sed 's/[\/.]/-/g')
+MEMORY_INDEX="${HOME}/.claude/projects/${CWD_SLUG}/memory/MEMORY.md"
+MEMORY_CONTENT=""
+[ -f "$MEMORY_INDEX" ] && MEMORY_CONTENT=$(head -c 2000 "$MEMORY_INDEX") || true
 
-# Build ROSTER block from team config.json
-# Team name follows the hatbrains-<repoKey> convention; look for the most
-# recent config in ~/.claude/teams/ matching that pattern.
+# ── Shared cross-repo learnings (vault; group-scoped only) ────────────────
+SHARED_CONTENT=""
+if [ "$PROJECT_GROUP" != "_solo" ]; then
+  SHARED_LEARNINGS="${VAULT_DIR}/${PROJECT_GROUP}--shared--learnings.md"
+  [ -f "$SHARED_LEARNINGS" ] && SHARED_CONTENT=$(head -c 4000 "$SHARED_LEARNINGS") || true
+fi
+
+# ── ROSTER block from the session's implicit team config ─────────────────
+# Team config lives at ~/.claude/teams/session-<first 8 hex of session_id>/
+# config.json — there is no TeamCreate/team_name; the session IS the team.
 ROSTER_BLOCK=""
-TEAM_NAME="hatbrains-${REPO_KEY}"
-TEAM_CONFIG="${HOME}/.claude/teams/${TEAM_NAME}/config.json"
-if [ -f "$TEAM_CONFIG" ]; then
-  ROSTER_BLOCK=$(jq -r '
-    "--- Team roster: " + .name + " ---\n" +
-    ( [ .members[]
-        | select(.name != "team-lead")
-        | "  " + .name + " (" + (.agentType // "unknown") + ")"
-      ] | join("\n")
-    ) + "\n\nMessaging conventions (CRITICAL — wrong names silently drop messages):\n  - Address the lead as exactly \"team-lead\" (not \"Neal\" — that name is never spawned as a teammate).\n  - Address peers by their exact name above (e.g. \"Dewey\", \"Ada\").\n  - SendMessage only RESUMES an already-spawned teammate; it does NOT spawn one.\n    Messaging a name that has never been spawned silently drops the message.\n  - Peer DMs are allowed for clarification (e.g. Marco→Dewey: \"do we have a cached result for X?\").\n  - State-changing actions (vault writes, repo commits, task ownership) stay in your own lane."
-  ' "$TEAM_CONFIG" 2>/dev/null) || ROSTER_BLOCK=""
+if [ -n "$SID" ]; then
+  SID8="${SID:0:8}"
+  TEAM_CONFIG="${HOME}/.claude/teams/session-${SID8}/config.json"
+  if [ -f "$TEAM_CONFIG" ]; then
+    ROSTER_BLOCK=$(jq -r '
+      "--- Team roster (session-'"${SID8}"') ---\n" +
+      ( [ .members[]
+          | select(.name != "team-lead")
+          | "  " + .name + " (" + (.agentType // "unknown") + ")"
+        ] | join("\n")
+      ) + "\n\nMessaging conventions (CRITICAL — wrong names misroute or drop messages):\n  - Address the lead as exactly \"team-lead\" (not \"Neal\" — that name is never spawned as a teammate).\n  - Address peers by their exact name above (e.g. \"Dewey\", \"Ada\").\n  - SendMessage only RESUMES an already-spawned teammate; it does NOT spawn one. Messaging a name that is not yet a live member is blocked by a guard hook, which returns a spawn hint rather than silently dropping.\n  - Peer DMs are allowed for clarification (e.g. Marco→Dewey: \"do we have a cached result for X?\").\n  - State-changing actions (vault writes, repo commits, task ownership) stay in your own lane."
+    ' "$TEAM_CONFIG" 2>/dev/null) || ROSTER_BLOCK=""
+  fi
 fi
 
 # If nothing to inject, exit clean
-if [ -z "$TRANSCRIPT_SLICE" ] && [ -z "$LEARNINGS_CONTENT" ] && [ -z "$SHARED_CONTENT" ] && [ -z "$ROSTER_BLOCK" ]; then
+if [ -z "$TRANSCRIPT_SLICE" ] && [ -z "$MEMORY_CONTENT" ] && [ -z "$SHARED_CONTENT" ] && [ -z "$ROSTER_BLOCK" ]; then
   exit 0
 fi
 
 # Build additionalContext as a sectioned text block
 ADDITIONAL_CTX=$(cat <<EOF
 === MAIN THREAD CONTEXT ===
-You are a teammate spawned by Neal. The main thread between the user and Neal
-is the source of truth for current intent. Below is the last ${TURNS_TO_INJECT}
-turns of that conversation, plus the active learnings for this repo/group.
+You are a teammate spawned by team-lead (Neal). The main thread between the
+user and team-lead is the source of truth for current intent. Below is the
+last ${TURNS_TO_INJECT} turns of that conversation, plus repo/group memory.
 
 projectGroup: ${PROJECT_GROUP}
 repoKey: ${REPO_KEY}
@@ -84,11 +107,12 @@ repoKey: ${REPO_KEY}
 --- Main thread (last ${TURNS_TO_INJECT} turns) ---
 ${TRANSCRIPT_SLICE:-<no transcript available>}
 
---- <${REPO_KEY}--learnings.md> ---
-${LEARNINGS_CONTENT:-<no learnings yet>}
+--- Project memory index (MEMORY.md) ---
+${MEMORY_CONTENT:-<none yet>}
+(Full memories live as individual files alongside this index at ${HOME}/.claude/projects/${CWD_SLUG}/memory/ — this is just the index.)
 
 --- <${PROJECT_GROUP}--shared--learnings.md> ---
-${SHARED_CONTENT:-<no shared learnings yet>}
+${SHARED_CONTENT:-<none — either no shared file yet, or this repo is ungrouped (_solo)>}
 
 ${ROSTER_BLOCK:+${ROSTER_BLOCK}
 }

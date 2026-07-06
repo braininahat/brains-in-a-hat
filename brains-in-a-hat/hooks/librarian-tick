@@ -1,66 +1,142 @@
 #!/usr/bin/env bash
 #
-# librarian-tick — TeammateIdle hook for Dewey (Librarian, new roster, opt-in)
+# librarian-tick — TeammateIdle hook for Dewey (Librarian).
 #
-# Fires when ANY teammate is about to go idle. We filter for Dewey
-# (the only always-on teammate, spawn name="Dewey") and re-engage it via the
-# documented TeammateIdle re-engagement mechanism:
+# Fires when ANY teammate is about to go idle. We filter for Dewey (the
+# only teammate this hook re-engages) and, when there's work to do,
+# re-engage via the sanctioned TeammateIdle mechanism: print the TICK
+# prompt to STDERR and exit 2. (An earlier version emitted
+# {"continue":false,...} JSON on stdout with exit 0 — that's undocumented
+# and does not work; exit 2 + stderr is the only sanctioned re-engage, and
+# the whole hook must finish well under the 5s timeout.)
 #
-#   JSON on stdout + exit 0:
-#     {"continue":false,"stopReason":"...","hookSpecificOutput":
-#       {"hookEventName":"TeammateIdle","additionalContext":"<prompt>"}}
-#
-# NOTE: exit 2 + plain-text-on-stdout is WRONG for TeammateIdle.
-# On exit 2, stdout is ignored by the runtime — only stderr is fed back.
-# The correct signal is JSON on stdout with exit 0 and continue:false.
-# (Previous versions used exit 2 which silently never re-engaged Librarian
-#  — this was the root cause of the original "didn't record the learning"
-#  symptom.)
-#
-# Bails (plain exit 0, no stdout) when:
-#   - the idling teammate is not Dewey (Librarian)
+# Bails (plain exit 0, no output) when:
+#   - the vault isn't a git repo (nothing for Dewey to do at all)
+#   - the idling teammate isn't Dewey
 #   - no transcript path / transcript not readable
-#   - no new transcript turns to process (and no pending sidecar)
+#   - no outstanding receipt to resolve, no new turns anywhere, no sweep hit
 #
-# Receipt model (advance-only-on-confirmed-vault-commit):
-#   A sidecar state/librarian-pending.<SID> is written BEFORE re-engaging
-#   Librarian. It records:
-#       PRE_HEAD=<vault HEAD SHA at tick-fire time>
-#       PROPOSED_CURSOR=<new total line count>
-#       RETRY=<0-based attempt count>
-#   On the NEXT tick, if vault HEAD advanced → cursor confirmed + promoted.
-#   If unchanged → re-slice + RETRY++. After MAX_RETRIES, escalate Neal
-#   and advance cursor (accept the loss) to avoid infinite retry loops.
+# IMPORTANT — hooks.json's TeammateIdle entry does NOT redirect this script's
+# stderr anywhere (unlike every other hook). That's deliberate: the harness
+# reads the TICK/RETRY prompt FROM stderr on an exit-2 re-engage, so
+# redirecting it into hook-debug.log (as an earlier version did) silently
+# swallows the prompt — Dewey gets re-engaged with no instructions. The
+# invariant this imposes: nothing may write to stderr in this script except
+# `reengage()`. Any internal debug/trace output (e.g. on the exit-0
+# escalation path) must append to `${STATE_DIR}/hook-debug.log` by explicit
+# path instead of using `>&2`.
 #
-# Configuration:
-#   - Cursor:  .brains_in_a_hat/state/librarian-cursor.<SID>
-#   - Pending: .brains_in_a_hat/state/librarian-pending.<SID>
+# State keying: cursor/pending/noop files are keyed by a hash of the
+# TRANSCRIPT PATH (not session id), so they survive across sessions/resumes
+# — a later session reading a different transcript file can still confirm
+# a prior tick or sweep up turns that were never curated. Each cursor file
+# stores the cursor value on line 1 and the transcript path on line 2, so a
+# sweep can find and re-open it without any other index.
+#
+#   Cursor:      state/librarian-cursor.<THASH>       "<line>\n<transcript>"
+#   Pending:     state/librarian-pending.<THASH>       PRE_HEAD=...\nPROPOSED_CURSOR=...\nPROPOSED_TRANSCRIPT=...\nRETRY=...
+#   Noop:        state/librarian-noop.<THASH>          (empty; existence is the receipt)
+#   Escalation:  state/librarian-escalation.<THASH>    (free text; surfaced + deleted by new-roster-bootstrap)
+#
+# Receipt model (advance-only-on-confirmed-work):
+#   A pending sidecar is written BEFORE re-engaging Dewey, recording the
+#   vault HEAD at fire time and the cursor value Dewey is being asked to
+#   reach. On the NEXT idle, we check for a receipt:
+#     - vault HEAD advanced since PRE_HEAD           → confirmed, promote
+#     - state/librarian-noop.<THASH> exists          → confirmed, promote
+#     - neither                                       → retry (bounded)
+#   This replaces the old "every tick MUST commit, even if empty" rule —
+#   Dewey may now genuinely report nothing to record without vault churn.
+#   After MAX_RETRIES consecutive unconfirmed ticks, we stop re-engaging,
+#   advance the cursor anyway (accept the loss so we don't retry forever),
+#   and write an escalation file for new-roster-bootstrap to surface.
+#
+# Sweep (tail-of-session fix): if the CURRENT transcript has nothing new,
+# look across all librarian-cursor.* files for one whose recorded
+# transcript path still exists and has more lines than its cursor — this
+# picks up a prior session's post-last-tick turns, which would otherwise
+# never be revisited (the next session reads a different transcript file).
+# At most one sweep target per invocation.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-source "${SCRIPT_DIR}/lib-common.sh"
+# Guarded source (#57 polish): a broken/missing lib shouldn't crash this
+# hook (it must always finish, well under the 5s TeammateIdle timeout).
+source "${SCRIPT_DIR}/lib-research.sh" 2>/dev/null || true
+: "${VAULT_DIR:=${BRAINS_VAULT_DIR:-${HOME}/.hatbrains}}"
 
 MAX_RETRIES=3
+STATE_DIR=".brains_in_a_hat/state"
 
-# ── Helper: emit re-engage JSON and exit 0 ────────────────────────────
-# Usage: reengage_file <tmpfile-containing-prompt-text>
-# Reads the prompt from a temp file so newlines and special chars are
-# handled correctly by jq --rawfile (avoids embedding newlines in shell
-# variables which break jq --arg).
-reengage_file() {
-  local prompt_file="$1"
-  jq -nc --rawfile ctx "$prompt_file" \
-    '{"continue":false,"stopReason":"librarian-tick re-engage","hookSpecificOutput":{"hookEventName":"TeammateIdle","additionalContext":$ctx}}'
-  rm -f "$prompt_file"
-  exit 0
+# Track every tmpfile we create so a trap can clean them up on any exit
+# path (including the reengage exit 2) instead of scattering manual `rm -f`.
+TMPFILES=()
+_cleanup_tmpfiles() {
+  local f
+  for f in "${TMPFILES[@]:-}"; do
+    [ -n "$f" ] && rm -f "$f"
+  done
+  return 0   # a trap's own exit status overrides the real `exit N` otherwise
+}
+trap _cleanup_tmpfiles EXIT
+
+# Sets the variable NAMED in $1 to a fresh tmpfile path. Must be called as
+# `_mktemp_tracked VARNAME`, never `VAR=$(_mktemp_tracked)` — the latter runs
+# the function in a subshell, so its TMPFILES+=() append is invisible to the
+# parent shell and nothing gets cleaned up.
+_mktemp_tracked() {
+  local __outvar="$1"
+  local f
+  f=$(mktemp)
+  TMPFILES+=("$f")
+  printf -v "$__outvar" '%s' "$f"
 }
 
-# Read hook input
+# Print $1 (a file containing the TICK prompt) to stderr and exit 2 — the
+# only sanctioned TeammateIdle re-engage signal.
+reengage() {
+  cat "$1" >&2
+  exit 2
+}
+
+write_pending() {
+  # $1=file $2=pre_head $3=cursor $4=transcript $5=retry
+  printf 'PRE_HEAD=%s\nPROPOSED_CURSOR=%s\nPROPOSED_TRANSCRIPT=%s\nRETRY=%s\n' \
+    "$2" "$3" "$4" "$5" > "$1"
+}
+
+write_cursor() {
+  # $1=file $2=cursor $3=transcript
+  printf '%s\n%s\n' "$2" "$3" > "$1"
+}
+
+cursor_value() {
+  [ -f "$1" ] && sed -n '1p' "$1" 2>/dev/null || true
+}
+
+cursor_transcript() {
+  [ -f "$1" ] && sed -n '2p' "$1" 2>/dev/null || true
+}
+
+# git rev-parse HEAD on a repo with zero commits prints the literal string
+# "HEAD" to STDOUT (its best-effort echo of the unresolved token) while
+# failing on stderr with exit 128 — `2>/dev/null || true` alone captures
+# that garbage instead of empty. Only trust stdout when the command
+# actually succeeded.
+vault_head() {
+  local h
+  h=$(git -C "$VAULT_DIR" rev-parse HEAD 2>/dev/null) || h=""
+  printf '%s' "$h"
+}
+
+# ── Bail early, before anything else: vault must be a git repo ───────────
+vault_is_git_repo || exit 0
+
+# ── Read hook input ────────────────────────────────────────────────────
 INPUT=$(cat)
 AGENT_NAME=$(echo "$INPUT" | jq -r '.agent_name // empty' 2>/dev/null) || AGENT_NAME=""
 TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null) || TRANSCRIPT=""
-SID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SID=""
 
 # Bail: not Dewey (Librarian) → exit 0 silently (let teammate idle normally)
 [ "$AGENT_NAME" = "Dewey" ] || exit 0
@@ -68,130 +144,173 @@ SID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SID=""
 # Bail: no transcript path → can't process
 [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] || exit 0
 
-STATE_DIR=".brains_in_a_hat/state"
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
-CURSOR_FILE="${STATE_DIR}/librarian-cursor.${SID}"
-PENDING_FILE="${STATE_DIR}/librarian-pending.${SID}"
+# ── Resolve any outstanding pending receipts ──────────────────────────────
+# In steady state there's at most one librarian-pending.* file (we never
+# propose new work while one is outstanding — see below), but this loop
+# tolerates more defensively. The first one that needs a retry or hits the
+# escalation ceiling ends the script (reengage exits 2; escalation exits 0).
+for PENDING_FILE in "$STATE_DIR"/librarian-pending.*; do
+  [ -f "$PENDING_FILE" ] || continue
+  P_THASH="${PENDING_FILE##*/librarian-pending.}"
+  CURSOR_FILE="${STATE_DIR}/librarian-cursor.${P_THASH}"
+  NOOP_FILE="${STATE_DIR}/librarian-noop.${P_THASH}"
 
-CURSOR=0
-[ -f "$CURSOR_FILE" ] && CURSOR=$(cat "$CURSOR_FILE") || true
-
-TOTAL_LINES=$(wc -l < "$TRANSCRIPT" 2>/dev/null || echo 0)
-
-# ── Receipt check: did Dewey actually commit last tick? ───────────────
-if [ -f "$PENDING_FILE" ]; then
   PRE_HEAD=""
   PROPOSED_CURSOR=""
+  PROPOSED_TRANSCRIPT=""
   RETRY=0
-  # Parse the sidecar (KEY=VALUE, one per line)
   while IFS='=' read -r key val; do
     case "$key" in
-      PRE_HEAD)         PRE_HEAD="$val" ;;
-      PROPOSED_CURSOR)  PROPOSED_CURSOR="$val" ;;
-      RETRY)            RETRY="$val" ;;
+      PRE_HEAD)             PRE_HEAD="$val" ;;
+      PROPOSED_CURSOR)       PROPOSED_CURSOR="$val" ;;
+      PROPOSED_TRANSCRIPT)   PROPOSED_TRANSCRIPT="$val" ;;
+      RETRY)                 RETRY="$val" ;;
     esac
   done < "$PENDING_FILE"
 
-  CURRENT_HEAD=""
-  if [ -d "$VAULT_DIR" ]; then
-    CURRENT_HEAD=$(git -C "$VAULT_DIR" rev-parse HEAD 2>/dev/null || true)
+  CURRENT_HEAD=$(vault_head)
+
+  CONFIRMED=false
+  if [ -z "$PRE_HEAD" ]; then
+    # First tick ever against a fresh vault (no commits at snapshot time) —
+    # HEAD-advance detection has nothing to advance FROM, so confirm on
+    # either a commit now existing or an explicit noop receipt.
+    if [ -n "$CURRENT_HEAD" ] || [ -f "$NOOP_FILE" ]; then
+      CONFIRMED=true
+    fi
+  else
+    if [ -n "$CURRENT_HEAD" ] && [ "$CURRENT_HEAD" != "$PRE_HEAD" ]; then
+      CONFIRMED=true
+    elif [ -f "$NOOP_FILE" ]; then
+      CONFIRMED=true
+    fi
   fi
 
-  if [ -n "$CURRENT_HEAD" ] && [ "$CURRENT_HEAD" != "$PRE_HEAD" ]; then
-    # Vault HEAD advanced → commit confirmed; promote the pending cursor
-    echo "$PROPOSED_CURSOR" > "$CURSOR_FILE"
-    CURSOR="$PROPOSED_CURSOR"
-    rm -f "$PENDING_FILE"
-  else
-    # No commit detected. Increment retry counter.
-    RETRY=$((RETRY + 1))
-    if [ "$RETRY" -ge "$MAX_RETRIES" ]; then
-      # Escalate. Advance cursor FIRST so the next tick doesn't re-slice
-      # the same turns and re-escalate every 3 ticks forever.
-      echo "$PROPOSED_CURSOR" > "$CURSOR_FILE"
-      rm -f "$PENDING_FILE"
-      ESCALATION_TMP=$(mktemp)
-      cat > "$ESCALATION_TMP" <<ESCEOF
-ESCALATION: Dewey (Librarian) failed to commit to the vault after ${MAX_RETRIES} consecutive ticks. Lines ${CURSOR}..${PROPOSED_CURSOR} are being skipped to prevent an infinite retry loop — they will NOT be re-processed. Vault HEAD has not advanced from ${PRE_HEAD}. Please inspect Librarian's last output and the vault at $VAULT_DIR — it may be unreachable or have a conflict that needs manual resolution. SendMessage to team-lead to report this.
+  if [ "$CONFIRMED" = "true" ]; then
+    write_cursor "$CURSOR_FILE" "$PROPOSED_CURSOR" "$PROPOSED_TRANSCRIPT"
+    rm -f "$PENDING_FILE" "$NOOP_FILE"
+    continue
+  fi
+
+  # Not confirmed.
+  RETRY=$((RETRY + 1))
+  if [ "$RETRY" -ge "$MAX_RETRIES" ]; then
+    # Escalate WITHOUT re-engaging Dewey (issue #57 C2): advance the cursor
+    # anyway (accept the loss so this doesn't retry forever), surface to
+    # team-lead via new-roster-bootstrap on the next prompt, and let Dewey
+    # stay idle.
+    write_cursor "$CURSOR_FILE" "$PROPOSED_CURSOR" "$PROPOSED_TRANSCRIPT"
+    rm -f "$PENDING_FILE" "$NOOP_FILE"
+    cat > "${STATE_DIR}/librarian-escalation.${P_THASH}" <<ESCEOF
+ESCALATION: Dewey (Librarian) failed to confirm a vault write after ${MAX_RETRIES} consecutive ticks. Lines are being skipped in ${PROPOSED_TRANSCRIPT} to prevent an infinite retry loop — they will NOT be re-processed (cursor advanced to ${PROPOSED_CURSOR}). Vault HEAD has not advanced from ${PRE_HEAD:-<no commits yet>}. Inspect Dewey's last output and the vault at ${VAULT_DIR} — it may be unreachable or have a conflict that needs manual resolution.
 ESCEOF
-      reengage_file "$ESCALATION_TMP"
-    fi
-    # Update retry count in sidecar, keep PROPOSED_CURSOR unchanged, re-slice from old CURSOR
-    printf 'PRE_HEAD=%s\nPROPOSED_CURSOR=%s\nRETRY=%s\n' \
-      "${PRE_HEAD}" "${PROPOSED_CURSOR}" "${RETRY}" > "$PENDING_FILE"
-    # CURSOR stays at old value so we re-slice the same turns
-    NEW_TURNS=$((TOTAL_LINES - CURSOR))
-    RETRY_TMP=$(mktemp)
-    cat > "$RETRY_TMP" <<RETRYEOF
-TICK (retry ${RETRY}/${MAX_RETRIES}): Your previous tick did not produce a confirmed vault commit (HEAD ${PRE_HEAD} unchanged). You MUST commit this tick. Re-processing $NEW_TURNS transcript turns (lines ${CURSOR}..${TOTAL_LINES}). Transcript: $TRANSCRIPT
+    # Debug trail only — goes straight to the log file by explicit path, not
+    # stderr. This path exits 0 (no re-engage), but stderr is unredirected at
+    # the hooks.json level for this hook (so exit-2 TICK prompts reach the
+    # harness cleanly); any stray stderr output here would leak right past
+    # that, so nothing but a reengage() prompt may ever go to stderr.
+    echo "$(date -Iseconds 2>/dev/null || date) librarian-tick: escalated after ${MAX_RETRIES} retries (thash=${P_THASH})" >> "${STATE_DIR}/hook-debug.log" 2>/dev/null || true
+    exit 0
+  fi
 
-MANDATORY: every tick must end with a vault commit, even if the only content is a "nothing-to-record" entry. Run:
-  git -C "\$VAULT_DIR" add -A
-  git -C "\$VAULT_DIR" commit -m "librarian-tick: <brief description or 'nothing to record'>"
-  git -C "\$VAULT_DIR" push
-Then SendMessage to team-lead with: "Tick SHA: <full commit SHA>. Processed N turns, M vault writes."
-If push fails, still commit locally and report the SHA — the push can retry later.
+  write_pending "$PENDING_FILE" "$PRE_HEAD" "$PROPOSED_CURSOR" "$PROPOSED_TRANSCRIPT" "$RETRY"
+  RETRY_CURSOR=$(cursor_value "$CURSOR_FILE")
+  [ -n "$RETRY_CURSOR" ] || RETRY_CURSOR=0
+  NEW_TURNS=$((PROPOSED_CURSOR - RETRY_CURSOR))
+  _mktemp_tracked RETRY_TMP
+  cat > "$RETRY_TMP" <<RETRYEOF
+TICK (retry ${RETRY}/${MAX_RETRIES}): Your previous tick did not produce a confirmed receipt (vault HEAD ${PRE_HEAD:-<no commits yet>} unchanged, and no noop file). Re-processing ${NEW_TURNS} transcript lines (${RETRY_CURSOR}..${PROPOSED_CURSOR}) of ${PROPOSED_TRANSCRIPT}.
 
+Run your standard idle-tick procedure:
   1. git -C "\$VAULT_DIR" pull --rebase --autostash (warn team-lead if it fails; continue with local).
-  2. Read transcript lines ${CURSOR}-${TOTAL_LINES} from $TRANSCRIPT.
+  2. Read lines ${RETRY_CURSOR}-${PROPOSED_CURSOR} of ${PROPOSED_TRANSCRIPT}.
   3. Classify each meaningful turn (skip noise per your persona).
   4. For each candidate fact, run curation: update / append / supersede / drop.
-  5. Commit + push as above. REPORT THE COMMIT SHA to team-lead via SendMessage.
+  5. If you made any vault writes: git -C "\$VAULT_DIR" add -A && git -C "\$VAULT_DIR" commit -m "<brief description>" && git -C "\$VAULT_DIR" push. Then SendMessage team-lead: "Tick SHA: <full commit SHA>. Processed N turns, M vault writes."
+  6. If there is genuinely nothing to record: do NOT commit. Instead run: touch "${NOOP_FILE}"
+     Then SendMessage team-lead: "Tick: NOOP, ${NEW_TURNS} turns scanned."
+Omitting both the commit/SHA report and the noop touch will trigger another retry on the next idle.
 
 Stay alive; you'll be re-engaged on the next idle.
 RETRYEOF
-    reengage_file "$RETRY_TMP"
-  fi
+  reengage "$RETRY_TMP"
+done
+
+# ── Decide what the next tick should be about ─────────────────────────────
+# Prefer the current session's own transcript. If it has nothing new,
+# sweep for another transcript with unprocessed lines (tail-of-session fix).
+CUR_THASH=$(cache_shorthash "$(_sha256 "$TRANSCRIPT")")
+CUR_CURSOR_FILE="${STATE_DIR}/librarian-cursor.${CUR_THASH}"
+CUR_CURSOR=$(cursor_value "$CUR_CURSOR_FILE")
+[ -n "$CUR_CURSOR" ] || CUR_CURSOR=0
+CUR_TOTAL=$(wc -l < "$TRANSCRIPT" 2>/dev/null || echo 0)
+
+TARGET_THASH="$CUR_THASH"
+TARGET_TRANSCRIPT="$TRANSCRIPT"
+TARGET_CURSOR="$CUR_CURSOR"
+TARGET_TOTAL="$CUR_TOTAL"
+
+if [ "$TARGET_TOTAL" -le "$TARGET_CURSOR" ]; then
+  SWEPT=""
+  for cf in $(ls -t "$STATE_DIR"/librarian-cursor.* 2>/dev/null); do
+    [ -f "$cf" ] || continue
+    SW_THASH="${cf##*/librarian-cursor.}"
+    [ "$SW_THASH" != "$CUR_THASH" ] || continue
+    SW_CURSOR=$(cursor_value "$cf")
+    [ -n "$SW_CURSOR" ] || SW_CURSOR=0
+    SW_TRANSCRIPT=$(cursor_transcript "$cf")
+    [ -n "$SW_TRANSCRIPT" ] && [ -f "$SW_TRANSCRIPT" ] || continue
+    SW_TOTAL=$(wc -l < "$SW_TRANSCRIPT" 2>/dev/null || echo 0)
+    if [ "$SW_TOTAL" -gt "$SW_CURSOR" ]; then
+      SWEPT="$SW_THASH"
+      TARGET_THASH="$SW_THASH"
+      TARGET_TRANSCRIPT="$SW_TRANSCRIPT"
+      TARGET_CURSOR="$SW_CURSOR"
+      TARGET_TOTAL="$SW_TOTAL"
+      break   # at most one sweep target per tick
+    fi
+  done
+  [ -n "$SWEPT" ] || exit 0   # nothing new anywhere
 fi
 
-# Bail: no new turns and no pending sidecar to resolve
-[ "$TOTAL_LINES" -gt "$CURSOR" ] || exit 0
+NEW_TURNS=$((TARGET_TOTAL - TARGET_CURSOR))
+PENDING_FILE="${STATE_DIR}/librarian-pending.${TARGET_THASH}"
+NOOP_FILE="${STATE_DIR}/librarian-noop.${TARGET_THASH}"
 
-NEW_TURNS=$((TOTAL_LINES - CURSOR))
-
-# RECORD-REQUEST fast path: if the new slice contains a literal RECORD-REQUEST:
-# token (placed there by Neal via SendMessage), prepend a hard directive so
-# Dewey cannot classify it as noise. Pure bash detection — no NLP.
+# RECORD-REQUEST fast path: if the new slice contains a literal
+# RECORD-REQUEST: token (placed there by team-lead via SendMessage),
+# prepend a hard directive so Dewey cannot classify it as noise.
 RECORD_REQUEST_PREFIX=""
-if [ -f "$TRANSCRIPT" ] && tail -n +"$((CURSOR + 1))" "$TRANSCRIPT" 2>/dev/null | grep -qF 'RECORD-REQUEST:'; then
+if tail -n +"$((TARGET_CURSOR + 1))" "$TARGET_TRANSCRIPT" 2>/dev/null | grep -qF 'RECORD-REQUEST:'; then
   RECORD_REQUEST_PREFIX="EXPLICIT RECORD REQUEST detected in this slice — you MUST write and commit it; do not classify as noise. Treat every RECORD-REQUEST: line as a mandatory vault write.
 
 "
 fi
 
-# Snapshot vault HEAD before re-engaging Librarian
-PRE_HEAD=""
-if [ -d "$VAULT_DIR" ]; then
-  PRE_HEAD=$(git -C "$VAULT_DIR" rev-parse HEAD 2>/dev/null || true)
-fi
+# Snapshot vault HEAD before re-engaging Dewey
+PRE_HEAD=$(vault_head)
 
-# Write the pending sidecar BEFORE emitting the prompt. This records the
-# expected state so the next tick can verify the commit actually happened.
-printf 'PRE_HEAD=%s\nPROPOSED_CURSOR=%s\nRETRY=%s\n' \
-  "${PRE_HEAD}" "${TOTAL_LINES}" "0" > "$PENDING_FILE"
+# Write the pending sidecar BEFORE emitting the prompt, so the next tick can
+# verify what actually happened.
+write_pending "$PENDING_FILE" "$PRE_HEAD" "$TARGET_TOTAL" "$TARGET_TRANSCRIPT" "0"
 
-# Build the TICK prompt in a temp file and emit via reengage_file.
-# Using a file (not a shell variable) so jq --rawfile handles newlines correctly.
-TICK_TMP=$(mktemp)
+_mktemp_tracked TICK_TMP
 cat > "$TICK_TMP" <<TICKEOF
-${RECORD_REQUEST_PREFIX}TICK: $NEW_TURNS new transcript turns since your last cursor (lines ${CURSOR}..${TOTAL_LINES}). Transcript: $TRANSCRIPT
-
-MANDATORY: this tick MUST end with a vault commit and push. Even if there is nothing meaningful to record, you must make an empty-record commit so the receipt system can confirm your tick ran:
-  git -C "\$VAULT_DIR" add -A
-  git -C "\$VAULT_DIR" commit -m "librarian-tick: <brief description or 'nothing to record'>"
-  git -C "\$VAULT_DIR" push
-Then SendMessage to team-lead with: "Tick SHA: <full commit SHA>. Processed N turns, M vault writes."
-Omitting the commit or the SHA report will trigger a retry on the next idle.
+${RECORD_REQUEST_PREFIX}TICK: ${NEW_TURNS} new transcript lines since your last cursor (${TARGET_CURSOR}..${TARGET_TOTAL}) of ${TARGET_TRANSCRIPT}.
 
 Run your standard idle-tick procedure:
   1. git -C "\$VAULT_DIR" pull --rebase --autostash (warn team-lead if it fails; continue with local).
-  2. Read the new transcript lines from $TRANSCRIPT (lines ${CURSOR}-${TOTAL_LINES}).
+  2. Read lines ${TARGET_CURSOR}-${TARGET_TOTAL} of ${TARGET_TRANSCRIPT}.
   3. Classify each meaningful turn (skip noise per your persona).
   4. For each candidate fact, run curation: update / append / supersede / drop.
-  5. Commit + push as above. REPORT THE COMMIT SHA to team-lead.
+  5. If you made any vault writes: git -C "\$VAULT_DIR" add -A && git -C "\$VAULT_DIR" commit -m "<brief description>" && git -C "\$VAULT_DIR" push. Then SendMessage team-lead: "Tick SHA: <full commit SHA>. Processed N turns, M vault writes."
+  6. If there is genuinely nothing to record: do NOT commit. Instead run: touch "${NOOP_FILE}"
+     Then SendMessage team-lead: "Tick: NOOP, ${NEW_TURNS} turns scanned."
+Omitting both the commit/SHA report and the noop touch will trigger a retry on the next idle.
 
 Stay alive; you'll be re-engaged on the next idle.
 TICKEOF
 
-reengage_file "$TICK_TMP"
+reengage "$TICK_TMP"

@@ -115,37 +115,9 @@ derive_project_group() {
   echo "_solo"
 }
 
-# vault_group_dir — full path to this project group's vault subdir.
-# Creates it (and the vault root) if missing. Does NOT git-init the vault —
-# that's vault-init.sh's job.
-vault_group_dir() {
-  local group
-  group=$(derive_project_group)
-  local dir="${VAULT_DIR}/${group}"
-  mkdir -p "$dir" 2>/dev/null || true
-  printf '%s' "$dir"
-}
-
 # vault_is_git_repo — exits 0 if VAULT_DIR is a git working tree, 1 otherwise.
-# Useful for hooks that want to warn the user about lost sync.
+# Useful for hooks that want to warn the user about lost sync, or gate
+# vault-dependent behavior off entirely when there's no vault (issue #56 S5).
 vault_is_git_repo() {
   [ -d "${VAULT_DIR}/.git" ] || git -C "$VAULT_DIR" rev-parse --git-dir >/dev/null 2>&1
-}
-
-# ── Vault lookup ──────────────────────────────────────────────────────
-# vault_find <type> [<project>]
-# Searches entire vault (flat root + legacy subdirs) by frontmatter properties.
-# Returns newline-separated paths sorted by modification time (newest first).
-
-vault_find() {
-  local type="$1" project="${2:-}"
-  [ -d "$VAULT_DIR" ] || return 0
-  local matches
-  matches=$(grep -rl "^type: ${type}$" "$VAULT_DIR" --include='*.md' 2>/dev/null) || true
-  [ -n "$matches" ] || return 0
-  if [ -n "$project" ]; then
-    matches=$(echo "$matches" | xargs grep -l "^project:.*${project}" 2>/dev/null) || true
-  fi
-  [ -n "$matches" ] || return 0
-  echo "$matches" | xargs ls -t 2>/dev/null
 }

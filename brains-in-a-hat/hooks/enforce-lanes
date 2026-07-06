@@ -1,0 +1,238 @@
+#!/usr/bin/env bash
+#
+# enforce-lanes — merged PreToolUse dispatcher (F3)
+#
+# Single hook replacing enforce-neal-allowlist + enforce-teammate-lanes and
+# all in-subagent.* marker machinery. Docs-confirmed: Pre/PostToolUse fire
+# inside teammates and carry agent_type/agent_id per call; both are empty
+# on the main thread. No marker files are read or written here.
+#
+#   agent_type EMPTY    → main thread (Neal): strict read+delegate allowlist.
+#   agent_type NONEMPTY → teammate lane table, keyed on the role name.
+#
+# Lane table:
+#   builder            → full access, no restriction.
+#   librarian          → Write/Edit/NotebookEdit only under $VAULT_DIR;
+#                        Bash git mutating ops only when vault-scoped.
+#   critic|scout|architect
+#   (or any other role) → read-only: deny Write/Edit/NotebookEdit and
+#                        Bash git mutating ops; everything else allowed.
+#
+# Fail-CLOSED design: unresolved vault path, or an unresolved librarian
+# file path that still looks like a traversal attempt, is denied — never
+# allowed by default.
+#
+# Output protocol: allow = exit 0 with no stdout. Deny = single-line JSON
+# {"decision":"block","reason":"..."} on stdout, exit 0. Malformed/missing
+# stdin is tolerated (falls through to exit 0) rather than crashing —
+# every jq call is guarded so a parse failure allows, except the
+# librarian fail-closed paths noted above.
+
+set -euo pipefail
+
+# ── Gate: plugin active in this session ─────────────────────────────────
+ls .brains_in_a_hat/state/active.* >/dev/null 2>&1 || exit 0
+
+INPUT=$(cat) || exit 0
+TOOL=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null) || TOOL=""
+[ -n "$TOOL" ] || exit 0
+AGENT_TYPE=$(printf '%s' "$INPUT" | jq -r '.agent_type // empty' 2>/dev/null) || AGENT_TYPE=""
+
+deny() {
+  local reason="$1"
+  jq -nc --arg r "$reason" '{decision:"block",reason:$r}'
+  exit 0
+}
+
+# Resolve a path as far as possible even if it doesn't exist yet (Write
+# creates new files). Prefers realpath -m, falls back to readlink -f,
+# falls back to empty (caller decides how to treat "unresolvable").
+resolve_path() {
+  local p="$1"
+  if command -v realpath >/dev/null 2>&1; then
+    realpath -m -- "$p" 2>/dev/null && return 0
+  fi
+  if command -v readlink >/dev/null 2>&1; then
+    readlink -f -- "$p" 2>/dev/null && return 0
+  fi
+  return 1
+}
+
+# ════════════════════════════════════════════════════════════════════════
+# TEAMMATE LANE (agent_type non-empty)
+# ════════════════════════════════════════════════════════════════════════
+if [ -n "$AGENT_TYPE" ]; then
+  # Normalize: strip the plugin prefix up to the last colon
+  # (brains-in-a-hat:librarian → librarian) and lowercase.
+  ROLE=$(printf '%s' "$AGENT_TYPE" | sed 's|.*:||' | tr '[:upper:]' '[:lower:]')
+
+  case "$ROLE" in
+
+    builder)
+      exit 0
+      ;;
+
+    librarian)
+      case "$TOOL" in
+        Write|Edit|NotebookEdit)
+          FILE=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null) || FILE=""
+
+          # ── Vault path resolution (lib-common.sh) ──────────────────────
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+          source "${SCRIPT_DIR}/lib-common.sh" 2>/dev/null || true
+          VAULT="${VAULT_DIR:-}"
+          if [ -z "$VAULT" ]; then
+            deny "Librarian lane: VAULT_DIR unresolved — Write blocked. Set BRAINS_VAULT_DIR or ensure lib-common.sh is reachable."
+          fi
+
+          ABS_VAULT=$(resolve_path "$VAULT") || ABS_VAULT="$VAULT"
+
+          ABS_FILE=$(resolve_path "$FILE") || ABS_FILE=""
+          if [ -z "$ABS_FILE" ]; then
+            # Path unresolvable. Fail CLOSED if the raw path still shows a
+            # traversal attempt (#56 S3) rather than trusting it.
+            case "$FILE" in
+              *..*)
+                deny "Librarian lane: path unresolvable and contains '..' — denied fail-closed (#56 S3). Attempted path: ${FILE:-<unknown>}."
+                ;;
+            esac
+            ABS_FILE="$FILE"
+          fi
+
+          case "$ABS_FILE" in
+            "$ABS_VAULT"/*) : ;;  # inside the vault — allowed
+            *)
+              deny "Librarian lane violation: Write/Edit is only permitted under the vault ($VAULT). Attempted path: ${FILE:-<unknown>}. Repo source writes must go through Builder."
+              ;;
+          esac
+          ;;
+
+        Bash)
+          CMD=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null) || CMD=""
+          if printf '%s' "$CMD" | grep -qE 'git[[:space:]].*(commit|push|add|reset|checkout|merge|rebase)'; then
+            SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+            source "${SCRIPT_DIR}/lib-common.sh" 2>/dev/null || true
+            VAULT="${VAULT_DIR:-}"
+            # Allow any of: git -C "$VAULT_DIR" ...  |  git -C "$BRAINS_VAULT_DIR" ...
+            # |  git -C "<resolved-vault-path>" ...
+            if printf '%s' "$CMD" | grep -qF '$VAULT_DIR' \
+                || printf '%s' "$CMD" | grep -qF '$BRAINS_VAULT_DIR' \
+                || { [ -n "$VAULT" ] && printf '%s' "$CMD" | grep -qF "$VAULT"; }; then
+              exit 0  # vault-scoped git op — allow
+            fi
+            deny "Librarian lane violation: git commit/push/add is only permitted on the vault repo. Commands must use git -C \"\$VAULT_DIR\" (or \$BRAINS_VAULT_DIR, or the resolved vault path). Detected: $CMD. Route repo-level git ops through Builder."
+          fi
+          ;;
+      esac
+      ;;
+
+    *)
+      # critic, scout, architect, and any other/unknown non-empty agent_type
+      # (e.g. Explore, general-purpose) — fail-closed read-only lane.
+      case "$TOOL" in
+        Write|Edit|NotebookEdit)
+          FILE=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null) || FILE=""
+          deny "${ROLE} lane violation: Write/Edit/NotebookEdit is not permitted for role '${ROLE}'. Attempted path: ${FILE:-<unknown>}. Route writes through Builder."
+          ;;
+        Bash)
+          CMD=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null) || CMD=""
+          if printf '%s' "$CMD" | grep -qE 'git[[:space:]].*(commit|push|add|reset|checkout|merge|rebase)'; then
+            deny "${ROLE} lane violation: git mutating operations (commit/push/add/reset/checkout/merge/rebase) are not permitted for role '${ROLE}'. Detected: $CMD. Route repo writes through Builder."
+          fi
+          ;;
+      esac
+      ;;
+
+  esac
+
+  exit 0
+fi
+
+# ════════════════════════════════════════════════════════════════════════
+# MAIN THREAD LANE (agent_type empty — Neal allowlist)
+# ════════════════════════════════════════════════════════════════════════
+case "$TOOL" in
+  # Read the codebase
+  Read|Grep|Glob)
+    exit 0 ;;
+  # Delegate work
+  Agent|SendMessage)
+    exit 0 ;;
+  # Task management
+  TaskCreate|TaskUpdate|TaskList|TaskGet|TaskOutput|TaskStop)
+    exit 0 ;;
+  # User communication
+  AskUserQuestion)
+    exit 0 ;;
+  # Mode management
+  EnterPlanMode|ExitPlanMode)
+    exit 0 ;;
+  # System tools
+  ToolSearch|Skill)
+    exit 0 ;;
+  # Bash: plugin infrastructure + curated read-only commands
+  Bash)
+    CMD=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null) || CMD=""
+
+    # (a) Plugin infrastructure commands (hooks and skills scripts)
+    if echo "$CMD" | grep -qE '/brains-in-a-hat/(hooks|skills)/|\.claude/plugins/.+/(hooks|skills)/'; then
+      exit 0
+    fi
+
+    # (b) gh api <endpoint> special-case. Endpoints legitimately contain
+    #     `{` `}` for path placeholders (e.g. repos/{owner}/{repo}), which
+    #     the generic metacharacter gate below would otherwise reject.
+    #     Checked with its own anchored, narrow charset before that gate
+    #     so it never widens what other commands can smuggle through.
+    if echo "$CMD" | LC_ALL=C grep -qE '^[[:space:]]*gh[[:space:]]+api[[:space:]]+[A-Za-z0-9_./:{}-]+([[:space:]]+(--paginate|(--jq|-q)[[:space:]]+[A-Za-z0-9_./:,@#-]+))*[[:space:]]*$'; then
+      exit 0
+    fi
+
+    # (c) Read-only allowlist — first reject any shell metacharacters
+    #     to prevent command chaining, redirection, substitution, pipes,
+    #     backgrounding, or process substitution. MUST run before the
+    #     prefix match so `gh project list; rm -rf ~` is blocked.
+    if echo "$CMD" | LC_ALL=C grep -qE '[;&|<>`$(){}\\]|>>|<<|--exec|-exec'; then
+      :  # has metacharacters → fall through to block
+    else
+      # (d) Anchored prefix allowlist for safe read-only binaries.
+      if echo "$CMD" | LC_ALL=C grep -qE '^[[:space:]]*(gh[[:space:]]+(project|repo|issue|pr|api|auth|search)[[:space:]]+(list|view|item-list|get|status|diff|checks|search)([[:space:]]+[-A-Za-z0-9_./=:,@#]+)*[[:space:]]*|git[[:space:]]+(log|status|diff|show|branch|remote|rev-parse|ls-files|ls-tree|describe|tag|for-each-ref|blame|shortlog|reflog[[:space:]]+show|worktree[[:space:]]+list|config[[:space:]]+--get)([[:space:]]+[-A-Za-z0-9_./=:,@#~^]+)*[[:space:]]*|ls([[:space:]]+-[lAah]+)?([[:space:]]+[-A-Za-z0-9_./]+)*[[:space:]]*|pwd[[:space:]]*|whoami[[:space:]]*|date([[:space:]]+[-+%A-Za-z0-9:_ ]+)?[[:space:]]*|cat[[:space:]]+[-A-Za-z0-9_./]+([[:space:]]+[-A-Za-z0-9_./]+)*[[:space:]]*|head([[:space:]]+-n[[:space:]]*[0-9]+)?[[:space:]]+[-A-Za-z0-9_./]+[[:space:]]*|tail([[:space:]]+-n[[:space:]]*[0-9]+)?[[:space:]]+[-A-Za-z0-9_./]+[[:space:]]*|wc([[:space:]]+-[lcw]+)?[[:space:]]+[-A-Za-z0-9_./]+[[:space:]]*|file[[:space:]]+[-A-Za-z0-9_./]+[[:space:]]*)$'; then
+        exit 0
+      fi
+    fi
+    ;;
+  # Write/Edit: allow plan files (plan mode needs these) and the harness
+  # per-project memory dir (Neal writes repo-scoped memories himself —
+  # the hybrid-memory allowlist exception, see F3/F5c).
+  Write|Edit)
+    FILE=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null) || FILE=""
+    case "$FILE" in
+      *..*)
+        # Traversal component present — never allow via the exception below,
+        # even if the path otherwise looks like it lands under plans/ or the
+        # memory dir (e.g. .../memory/../../../../etc/passwd). Fall through
+        # to the deny block instead of pattern-matching a literal "..".
+        ;;
+      *.claude/plans/*)
+        exit 0 ;;
+      "$HOME"/.claude/projects/*/memory/*)
+        exit 0 ;;
+    esac
+    ;;
+esac
+
+# Block with routing suggestion
+case "$TOOL" in
+  Write|Edit|NotebookEdit)
+    SUGGEST="Builder (for code/docs); project memories you may write yourself under the harness memory dir" ;;
+  Bash)
+    SUGGEST="Builder (for git/CI/test runs) or Dewey (for vault git ops)" ;;
+  WebSearch|WebFetch)
+    SUGGEST="Marco (Scout)" ;;
+  *)
+    SUGGEST="the appropriate teammate" ;;
+esac
+
+REASON="Team lead can only read, manage tasks, and delegate. Route ${TOOL} to ${SUGGEST}."
+jq -nc --arg r "$REASON" '{decision:"block", reason:$r}'
+exit 0

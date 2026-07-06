@@ -24,6 +24,11 @@ source "${SCRIPT_DIR}/lib-research.sh"   # also sources lib-common.sh
 
 BODY_CAP="${BRAINS_RESEARCH_CACHE_BODY_CAP:-6000}"
 
+# ── Gate: vault must exist (issue #56 S5) ──────────────────────────────
+# Without a vault there's nowhere to write a cache entry — fail silently
+# rather than error partway through a write.
+vault_is_git_repo || exit 0
+
 # ── Gate: active session only ──────────────────────────────────────────
 if ! ls ".brains_in_a_hat/state/active."* >/dev/null 2>&1; then
   exit 0
