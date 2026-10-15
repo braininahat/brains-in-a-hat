@@ -175,6 +175,30 @@ async function load($: EngineInterface, root: string): Promise<AtlasMap> {
   return map
 }
 
+const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'stage'
+const sampleRel = (name: string) => `.claude/atlas/samples/${slug(name)}.png`
+
+/** Copies each newly linked stage's iris render into the project, so the sample outlives the session. */
+async function storeSamples($: EngineInterface, map: AtlasMap, linked: readonly string[]): Promise<AtlasMap> {
+  const stages = []
+  for (const s of map.stages) {
+    if (linked.includes(s.name) && s.figure !== undefined) {
+      const png = await irisPng($, s.figure)
+      if (png) {
+        const rel = sampleRel(s.name)
+        const out = await $.process.run(['sh', '-c', 'mkdir -p "$(dirname "$2")" && cp "$1" "$2"', 'atlas', png, `${projectRoot}/${rel}`])
+        if (out.exitCode === 0) {
+          dims.delete(`${projectRoot}/${rel}`)
+          stages.push({ ...s, sample: rel })
+          continue
+        }
+      }
+    }
+    stages.push(s)
+  }
+  return { ...map, stages }
+}
+
 /** The iris PNG for figure `n`'s latest version and current page. */
 async function irisPng($: EngineInterface, n: number): Promise<string | undefined> {
   const fig = (await read($, irisFigures)).find(f => f.n === n)
@@ -288,7 +312,8 @@ function sampleText(stage: AtlasStage): string {
 }
 
 function lookText(stage: AtlasStage): string {
-  return `Look at iris figure #${stage.figure} for the "${stage.name}" stage: Read its PNG and tell me what is actually visible and whether anything looks wrong.`
+  const what = stage.sample ? `the sample at ${projectRoot}/${stage.sample}` : `iris figure #${stage.figure}`
+  return `Look at ${what} for the "${stage.name}" stage: Read the PNG and tell me what is actually visible and whether anything looks wrong.`
 }
 
 /** The instructions the drift buttons send, as if typed. */
@@ -338,7 +363,7 @@ export const register: Register = on => {
       lines.push(`atlas: ${bandLine(map, false)}${terms.length > 0 ? ` · Glossary: ${terms.join(', ')}` : ''} · atlas_update with no arguments returns the full map.`)
       if (map.recap) lines.push(`atlas recap: ${map.recap.where} Next: ${map.recap.next}`)
       if (map.drift) lines.push(`atlas: drift note on the step in focus: ${map.drift.note}`)
-      const unsampled = map.stages.filter(st => st.figure === undefined).map(st => st.name)
+      const unsampled = map.stages.filter(st => st.figure === undefined && st.sample === undefined).map(st => st.name)
       if (unsampled.length > 0) {
         lines.push(`atlas: pipeline stages with no sample yet: ${unsampled.join(', ')}. When the work touches one of them, render one real example with iris and link it (stages[].figure).`)
       }
@@ -353,7 +378,8 @@ export const register: Register = on => {
     const { tool: _t, tool_use_id: _id, ...patch } = e as unknown as Patch & { tool: string; tool_use_id: string }
     const map = await read($, mapAtom)
     if (Object.keys(patch).length === 0) return { result: toMarkdown(map, await read($, seen)) }
-    const next = applyPatch(map, patch, await $.clock.now())
+    const linked = (patch.stages ?? []).filter(st => st.figure !== undefined).map(st => st.name)
+    const next = await storeSamples($, applyPatch(map, patch, await $.clock.now()), linked)
     await save($, next)
     await update($, changes, () => 0)
     await update($, isStale, () => false)
@@ -376,11 +402,21 @@ export const register: Register = on => {
   // A Read of an iris render means Claude looked at that figure.
   on('tool.call', { tool: 'Read' }, async ($, e, next) => {
     const result = await next(e)
+    if (result.deny !== undefined) return result
     const m = /\/iris-[^/]+\/(\d+)\/v\d+-p\d+\.png$/.exec(e.file_path)
-    if (m && result.deny === undefined) {
-      const n = Number(m[1])
-      await update($, seen, list => (list.includes(n) ? list : [...list, n]))
-    }
+    const n = m ? Number(m[1]) : undefined
+    if (n !== undefined) await update($, seen, list => (list.includes(n) ? list : [...list, n]))
+    // Looking at a stage's render, or at its stored sample, marks that stage seen in the saved map.
+    const map = await read($, mapAtom)
+    const now = await $.clock.now()
+    let isChanged = false
+    const stages = map.stages.map(st => {
+      const isThis = (n !== undefined && st.figure === n) || (st.sample !== undefined && e.file_path === `${projectRoot}/${st.sample}`)
+      if (!isThis) return st
+      isChanged = true
+      return { ...st, seenAt: now }
+    })
+    if (isChanged) await save($, { ...map, stages })
     return result
   })
 
@@ -691,11 +727,13 @@ export const register: Register = on => {
     } else if (current === 'pipeline') {
       const cards = []
       for (const [i, s] of map.stages.entries()) {
-        const isSeen = s.figure !== undefined && looked.includes(s.figure)
-        const colour = s.figure === undefined ? GREY : isSeen ? GREEN : ORANGE
+        const hasSample = s.figure !== undefined || s.sample !== undefined
+        const isSeen = s.seenAt !== undefined || (s.figure !== undefined && looked.includes(s.figure))
+        const colour = !hasSample ? GREY : isSeen ? GREEN : ORANGE
         let thumb = null
-        if (hasImages && e.surface === 'terminal' && s.figure !== undefined) {
-          const png = await irisPng($, s.figure)
+        if (hasImages && e.surface === 'terminal' && hasSample) {
+          const stored = s.sample ? `${projectRoot}/${s.sample}` : undefined
+          const png = stored && (await $.fs.exists(stored)) ? stored : s.figure !== undefined ? await irisPng($, s.figure) : undefined
           const d = png ? await pngDims($, png).catch(() => undefined) : undefined
           if (png && d) {
             const { Image } = $.ui.resolve(e)
@@ -716,8 +754,8 @@ export const register: Register = on => {
             colour,
             <Box flexDirection="column">
               <Box flexDirection="row" columnGap={1}>
-                {s.figure === undefined ? chip('No sample', GREY) : isSeen ? chip('Seen ✓', GREEN) : chip('Numbers only', ORANGE)}
-                {s.figure !== undefined && <Text dimColor>Figure #{s.figure}</Text>}
+                {!hasSample ? chip('No sample', GREY) : isSeen ? chip('Seen ✓', GREEN) : chip('Not looked at', ORANGE)}
+                {s.sample !== undefined ? <Text dimColor>{s.sample}</Text> : s.figure !== undefined && <Text dimColor>Figure #{s.figure}</Text>}
               </Box>
               {(s.in || s.out) && (
                 <Text>
@@ -728,10 +766,10 @@ export const register: Register = on => {
                 </Text>
               )}
               {s.note && <Text dimColor>{s.note}</Text>}
-              {s.figure === undefined && (
+              {!hasSample && (
                 <Button key={`sample-${i}`} label="Generate sample" onPress={() => $.prompt.submit({ text: sampleText(s), asUser: true })} />
               )}
-              {s.figure !== undefined && !isSeen && (
+              {hasSample && !isSeen && (
                 <Button key={`look-${i}`} label="Look at it" onPress={() => $.prompt.submit({ text: lookText(s), asUser: true })} />
               )}
               {thumb}

@@ -103,3 +103,13 @@ test('the pane invites a map while empty', async $ => {
     await ui.unmount()
   }
 })
+
+test('a stage keeps its seen mark until it gets a new sample', async () => {
+  let map = applyPatch(EMPTY, { stages: [{ name: 'Crop', figure: 3 }] }, T0)
+  map = { ...map, stages: map.stages.map(s => ({ ...s, sample: '.claude/atlas/samples/crop.png', seenAt: T0 + 1 })) }
+  map = applyPatch(map, { stages: [{ name: 'Crop', note: 'Fan geometry fixed' }] }, T0 + 2)
+  expect(map.stages[0]?.seenAt).toBe(T0 + 1)
+  map = applyPatch(map, { stages: [{ name: 'Crop', figure: 4 }] }, T0 + 3)
+  expect(map.stages[0]?.seenAt).toBeUndefined()
+  expect(toMarkdown(map, [])).toContain('- Crop: [figure #4, not looked at yet] Fan geometry fixed')
+})

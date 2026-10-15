@@ -229,8 +229,13 @@ export function applyPatch(map: AtlasMap, patch: Patch, now: number): AtlasMap {
   for (const stage of patch.stages ?? []) {
     if (stage.name === '') continue
     const at = next.stages.findIndex(s => s.name === stage.name)
-    if (at < 0) next.stages.push({ ...stage })
-    else next.stages[at] = { ...next.stages[at], ...stage }
+    const old = next.stages[at]
+    if (at < 0 || !old) next.stages.push({ ...stage })
+    else {
+      // A new sample has not been looked at yet.
+      const isNewSample = stage.figure !== undefined && stage.figure !== old.figure
+      next.stages[at] = { ...old, ...stage, ...(isNewSample ? { seenAt: undefined, sample: stage.sample } : {}) }
+    }
   }
   if (patch.remove_stages) next.stages = next.stages.filter(s => !patch.remove_stages?.includes(s.name))
   for (const item of patch.trail ?? []) trail(item.kind, item.text)
@@ -330,7 +335,10 @@ export function toMarkdown(map: AtlasMap, seen: readonly number[]): string {
     out.push('', 'Pipeline stages:')
     for (const s of map.stages) {
       const shape = s.in || s.out ? ` ${s.in ?? '?'} → ${s.out ?? '?'}` : ''
-      const look = s.figure === undefined ? 'no sample shown' : seen.includes(s.figure) ? `seen (figure #${s.figure})` : `figure #${s.figure}, not looked at yet`
+      const hasSample = s.figure !== undefined || s.sample !== undefined
+      const isSeen = s.seenAt !== undefined || (s.figure !== undefined && seen.includes(s.figure))
+      const where = s.sample ?? `figure #${s.figure}`
+      const look = !hasSample ? 'no sample shown' : isSeen ? `seen (${s.sample ?? `figure #${s.figure}`})` : `${where}, not looked at yet`
       out.push(`- ${s.name}:${shape} [${look}]${s.note ? ` ${s.note}` : ''}`)
     }
   }

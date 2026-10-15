@@ -18,8 +18,12 @@ export type AtlasStage = {
   name: string
   in?: string
   out?: string
-  /** iris figure number showing a sample of this stage's output. */
+  /** iris figure number the sample came from (session-scoped; the sample file is what lasts). */
   figure?: number
+  /** The sample image, copied into the project: a path relative to the project root. */
+  sample?: string
+  /** When Claude last read this stage's sample; cleared when the sample changes. */
+  seenAt?: number
   note?: string
 }
 
