@@ -553,7 +553,8 @@ export const register: Register = on => {
         description: 'Summarises one chunk of a project\'s past transcripts for /atlas init: goals, steps with results, decisions, dead ends, facts, open threads, terms.',
         prompt: HISTORIAN_PROMPT,
         tools: ['Read'],
-        model: 'sonnet',
+        // Haiku kept every checked number on two cerebrov2 chunks and found more contradictions than Sonnet; the main session does the judgement.
+        model: 'haiku',
         maxTurns: 12,
         omitClaudeMd: true,
       })
