@@ -1,6 +1,6 @@
 {
   "name": "braininahat",
-  "description": "AI agents for Claude Code — team orchestration with Obsidian memory and publication-quality figures",
+  "description": "Claude Code plugins and mods: iris (diagram viewer pane), atlas (project map), plus an agent team and figure tools",
   "owner": {
     "name": "braininahat"
   },
@@ -13,9 +13,21 @@
     },
     {
       "name": "archer",
-      "description": "Publication-quality scientific visualization — ML architecture diagrams, TikZ rendering, Typst reports, and data plots following petarv/janosh visual principles",
+      "description": "Publication-quality scientific visualization \u2014 ML architecture diagrams, TikZ rendering, Typst reports, and data plots following petarv/janosh visual principles",
       "version": "0.1.47",
       "source": "./archer"
+    },
+    {
+      "name": "iris",
+      "description": "Diagram and image viewer pane: Claude renders Mermaid, Graphviz, TikZ, Typst, PDF, SVG and images, shows them beside the transcript, and looks at every render.",
+      "version": "0.1.0",
+      "source": "./iris"
+    },
+    {
+      "name": "atlas",
+      "description": "A map of the work beside the transcript: goal, current step, facts, glossary, pipeline stages with iris samples, and a trail of results and decisions.",
+      "version": "0.1.0",
+      "source": "./atlas"
     }
   ]
 }

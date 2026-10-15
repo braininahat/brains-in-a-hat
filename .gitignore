@@ -3,3 +3,6 @@ __pycache__/
 .claude/
 dogfood-output/
 *.log
+
+# Generated per Claude Code build by the mod engine
+*/.claude-plugin/types/

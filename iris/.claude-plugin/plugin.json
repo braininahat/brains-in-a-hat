@@ -1,0 +1,6 @@
+{
+  "name": "iris",
+  "version": "0.1.0",
+  "description": "Diagram and image viewer pane: Claude renders Mermaid, Graphviz, TikZ, Typst, PDF, SVG and images, shows them beside the transcript, and looks at every render.",
+  "types": "./types/index.d.ts"
+}

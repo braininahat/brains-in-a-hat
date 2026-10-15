@@ -1,5 +1,16 @@
 # brains-in-a-hat
 
+## Mods: iris and atlas
+
+Two Claude Code mods live here: [iris](./iris) (diagrams and images in a side pane) and [atlas](./atlas) (a map of the work that survives long sessions). Load them in every session from a checkout:
+
+```jsonc
+// ~/.claude/settings.json
+{ "env": { "CLAUDE_CODE_PLUGIN_DIRS": "/path/to/brains-in-a-hat/iris:/path/to/brains-in-a-hat/atlas" } }
+```
+
+or install them from this marketplace with `/plugin`.
+
 **Lazy-spawned Claude Code agent team with closed-loop self-improvement, hybrid memory (harness-native per-repo + optional Obsidian-synced cross-repo vault), and multi-repo project constellations.**
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.178%2B-orange)](https://code.claude.com)

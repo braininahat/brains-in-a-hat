@@ -1,0 +1,7 @@
+{
+  "name": "atlas",
+  "version": "0.1.0",
+  "description": "A map of the work beside the transcript: goal, current step, facts, glossary, pipeline stages with iris samples, and a trail of results and decisions.",
+  "types": "./types/index.d.ts",
+  "dependencies": ["iris"]
+}
