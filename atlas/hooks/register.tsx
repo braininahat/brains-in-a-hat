@@ -160,16 +160,33 @@ function withMyFocus(map: AtlasMap): AtlasMap {
   return mine ? { ...map, focus: mine.focus } : map
 }
 
+const lockDir = (root: string) => `${root}/.claude/atlas/.lock`
+
+/** Runs scripts/maplock.py: the lock several sessions take before writing a project's map. */
+async function maplock($: EngineInterface, ...args: string[]): Promise<boolean> {
+  const out = await $.process.run(['python3', '-I', `${$.plugin.root}/scripts/maplock.py`, ...args], { timeoutMs: 10_000 }).catch(() => undefined)
+  return out?.exitCode === 0
+}
+
+/** Writes a file in one step (a temporary file renamed over it), so another session never reads half of it. */
+async function writeWhole($: EngineInterface, file: string, text: string) {
+  const tmp = `${file}.tmp-${sessionId || 'atlas'}`
+  await $.fs.write(tmp, text)
+  if (!(await maplock($, 'put', tmp, file))) await $.fs.write(file, text)
+}
+
 async function save($: EngineInterface, map: AtlasMap) {
   const now = await $.clock.now()
   const sessions = Object.fromEntries(Object.entries(map.sessions ?? {}).filter(([, v]) => now - v.t < SESSION_MAX_AGE_MS))
   if (sessionId !== '') sessions[sessionId] = { name: sessionName || sessionId.slice(0, 8), focus: map.focus, t: now }
   map = { ...map, sessions }
   await update($, mapAtom, () => map)
-  await $.fs.write(mapFile(projectRoot), `${JSON.stringify(map, null, 2)}\n`)
+  const ignore = `${projectRoot}/.claude/atlas/.gitignore`
+  if (!(await $.fs.exists(ignore))) await $.fs.write(ignore, '# Written by atlas: the lock and half-written files never belong in git.\n.lock/\n*.tmp-*\nmap.unreadable-*.json\n')
+  await writeWhole($, mapFile(projectRoot), `${JSON.stringify(map, null, 2)}\n`)
   fileMtime = (await $.fs.stat(mapFile(projectRoot)).catch(() => undefined))?.mtimeMs ?? fileMtime
   const notes = isEmpty(map) ? '' : toMarkdown(map, await read($, seen))
-  await $.fs.write(mapNotes(projectRoot), `<!-- Written by atlas; change it with /atlas or atlas_update. -->\n# atlas map\n\n${notes}\n`)
+  await writeWhole($, mapNotes(projectRoot), `<!-- Written by atlas; change it with /atlas or atlas_update. -->\n# atlas map\n\n${notes}\n`)
 }
 
 /** The newest map: re-read from disk when another session wrote it since we last did. */
@@ -188,11 +205,23 @@ async function latest($: EngineInterface): Promise<AtlasMap> {
   return read($, mapAtom)
 }
 
-/** Every change goes through here, so changes from several sessions merge instead of overwriting. */
-async function mutate($: EngineInterface, change: (map: AtlasMap) => AtlasMap | Promise<AtlasMap>): Promise<AtlasMap> {
-  const next = await change(await latest($))
-  await save($, next)
-  return next
+/**
+ * Every change goes through here, so changes from several sessions merge instead of overwriting:
+ * under the project's lock, read the file as it is now, apply the change, write it back.
+ * Keep `change` quick (no copying or rendering): other sessions wait while it runs.
+ */
+async function mutate($: EngineInterface, change: (map: AtlasMap) => AtlasMap): Promise<AtlasMap> {
+  const dir = lockDir(projectRoot)
+  // Without the lock (another writer stuck for 5 s), write anyway: atlas never blocks the session.
+  const isLocked = await maplock($, 'take', dir)
+  try {
+    fileMtime = -1
+    const next = change(await latest($))
+    await save($, next)
+    return next
+  } finally {
+    if (isLocked) await maplock($, 'drop', dir)
+  }
 }
 
 /** This session's display name, from its transcript (custom title or agent name). */
@@ -206,12 +235,19 @@ async function readSessionName($: EngineInterface, root: string, id: string): Pr
 /** A project's map: its repo file, else a map left in the old per-machine store (moved into the repo once). */
 async function load($: EngineInterface, root: string): Promise<AtlasMap> {
   if (await $.fs.exists(mapFile(root))) {
-    try {
-      fileMtime = (await $.fs.stat(mapFile(root))).mtimeMs
-      return withMyFocus(migrate(JSON.parse(await $.fs.read(mapFile(root)))))
-    } catch {
-      return migrate(undefined)
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        fileMtime = (await $.fs.stat(mapFile(root))).mtimeMs
+        return withMyFocus(migrate(JSON.parse(await $.fs.read(mapFile(root)))))
+      } catch {
+        await $.clock.sleep(300)
+      }
     }
+    // Still unreadable (a git merge conflict, say): keep a copy so starting over loses nothing.
+    const copy = `${root}/.claude/atlas/map.unreadable-${await $.clock.now()}.json`
+    await $.process.run(['cp', mapFile(root), copy]).catch(() => undefined)
+    $.ui.toast(`atlas: map.json could not be read; kept a copy at ${copy} and started a new map.`)
+    return migrate(undefined)
   }
   const legacy = await $.store.get(`map:${root}`)
   const map = migrate(legacy)
@@ -227,25 +263,26 @@ async function load($: EngineInterface, root: string): Promise<AtlasMap> {
 const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'stage'
 const sampleRel = (name: string) => `.claude/atlas/samples/${slug(name)}.png`
 
-/** Copies each newly linked stage's iris render into the project, so the sample outlives the session. */
-async function storeSamples($: EngineInterface, map: AtlasMap, linked: readonly string[]): Promise<AtlasMap> {
-  const stages = []
-  for (const s of map.stages) {
-    if (linked.includes(s.name) && s.figure !== undefined) {
-      const png = await irisPng($, s.figure)
-      if (png) {
-        const rel = sampleRel(s.name)
-        const out = await $.process.run(['sh', '-c', 'mkdir -p "$(dirname "$2")" && cp "$1" "$2"', 'atlas', png, `${projectRoot}/${rel}`])
-        if (out.exitCode === 0) {
-          dims.delete(`${projectRoot}/${rel}`)
-          stages.push({ ...s, sample: rel })
-          continue
-        }
-      }
+/** Copies each newly linked stage's iris render into the project, so the sample outlives the session. Returns stage name → sample path. */
+async function copySamples($: EngineInterface, linked: readonly { name: string; figure: number }[]): Promise<Map<string, string>> {
+  const copied = new Map<string, string>()
+  for (const { name, figure } of linked) {
+    const png = await irisPng($, figure)
+    if (!png) continue
+    const rel = sampleRel(name)
+    const out = await $.process.run(['sh', '-c', 'mkdir -p "$(dirname "$2")" && cp "$1" "$2"', 'atlas', png, `${projectRoot}/${rel}`])
+    if (out.exitCode === 0) {
+      dims.delete(`${projectRoot}/${rel}`)
+      copied.set(name, rel)
     }
-    stages.push(s)
   }
-  return { ...map, stages }
+  return copied
+}
+
+/** Points the copied stages at their stored samples. */
+function withSamples(map: AtlasMap, copied: ReadonlyMap<string, string>): AtlasMap {
+  if (copied.size === 0) return map
+  return { ...map, stages: map.stages.map(st => (copied.has(st.name) && st.figure !== undefined ? { ...st, sample: copied.get(st.name) } : st)) }
 }
 
 /** The iris PNG for figure `n`'s latest version and current page. */
@@ -567,9 +604,10 @@ export const register: Register = on => {
   on('tool.call', { tool: TOOL }, async ($, e) => {
     const { tool: _t, tool_use_id: _id, ...patch } = e as unknown as Patch & { tool: string; tool_use_id: string }
     if (Object.keys(patch).length === 0) return { result: toMarkdown(await latest($), await read($, seen)) }
-    const linked = (patch.stages ?? []).filter(st => st.figure !== undefined).map(st => st.name)
+    const linked = (patch.stages ?? []).flatMap(st => (st.figure !== undefined ? [{ name: st.name, figure: st.figure }] : []))
+    const copied = await copySamples($, linked)
     const now = await $.clock.now()
-    const next = await mutate($, m => storeSamples($, applyPatch(m, patch, now), linked))
+    const next = await mutate($, m => withSamples(applyPatch(m, patch, now), copied))
     await update($, changes, () => 0)
     await update($, isStale, () => false)
     return { result: `Map updated. Above the prompt: ${bandLine(next, false) || '(nothing pinned yet)'}` }
@@ -627,7 +665,9 @@ export const register: Register = on => {
     )
     if (!stage) return result
     const now = await $.clock.now()
-    await mutate($, mm => storeSamples($, applyPatch(mm, { stages: [{ name: stage.name, figure: Number(m[1]) }] }, now), [stage.name]))
+    const figure = Number(m[1])
+    const copied = await copySamples($, [{ name: stage.name, figure }])
+    await mutate($, mm => withSamples(applyPatch(mm, { stages: [{ name: stage.name, figure }] }, now), copied))
     return result
   })
 
