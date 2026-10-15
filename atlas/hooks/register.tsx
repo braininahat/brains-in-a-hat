@@ -478,7 +478,7 @@ function bootstrapText(history: { chunks: { file: string; from: string; to: stri
     '1. Start from what you already know in this conversation: the goal, what has been done, what is in progress, what was tried and dropped, and what is waiting on me.',
     ...past,
     '3. Check and fill gaps from the repository with a quick read: README or context docs, backlog or notes, recent git log and branches, run or result records, uncommitted changes. Do not read everything; aim for the shape of the project. Where history and the repository disagree, the newer source usually wins, but say so.',
-    '4. Write it with atlas_update, in a few calls:',
+    '4. Write it with atlas_update, in a few calls. If the map already has content (call atlas_update with no arguments to see it), revise it instead of starting over: keep steps, sub-steps and outcomes that are right, correct the rest, and add only trail lines, facts and glossary entries that are not there yet.',
     '   - goal (one line, with the target and deadline if there is one)',
     '   - steps: the top-level plan with done and in-progress marked (step_updates with one-line outcomes for finished steps); then focus on where the work actually is now, with substeps for the branch the work drilled into, and detours for side work that left its step',
     '   - facts: datasets and versions, input and output shapes and dtypes, splits, key paths, best scores and which run produced them, deadlines; pin the three that matter most right now',
