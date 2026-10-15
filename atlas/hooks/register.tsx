@@ -29,6 +29,7 @@ const tab = atom({ plugin: 'atlas', key: 'tab' } as const, 'map')
 const seen = atom({ plugin: 'atlas', key: 'seen' } as const, [])
 const isWatching = atom({ plugin: 'atlas', key: 'isWatching' } as const, false)
 const isInitDismissed = atom({ plugin: 'atlas', key: 'isInitDismissed' } as const, false)
+const isKeeping = atom({ plugin: 'atlas', key: 'isKeeping' } as const, false)
 // iris's state, read only: which figure the iris pane shows, and every figure's renders.
 const irisSel = atom({ plugin: 'iris', key: 'sel' } as const, null)
 const irisFigures = atom({ plugin: 'iris', key: 'figures' } as const, [])
@@ -99,6 +100,7 @@ const MAP_SCHEMA = {
           in: { type: 'string', description: 'Input shape or type.' },
           out: { type: 'string', description: 'Output shape or type.' },
           figure: { type: 'integer', description: 'iris figure number showing a sample of this stage.' },
+          sample: { type: 'string', description: 'A sample image already saved in the project, e.g. .claude/atlas/samples/crop.png.' },
           note: { type: 'string' },
         },
         required: ['name'],
@@ -289,6 +291,69 @@ async function watch($: EngineInterface, model: string, recent: Turn[]) {
   }
 }
 
+const KEEPER_PROMPT = `You are the atlas keeper. You keep the project's atlas map true in the background so the user never has to ask for upkeep. The map is shown to a user who thinks visually and loses track of long sessions.
+
+Rules:
+- Read anything in the project. Write files only inside .claude/atlas/ (sample images). Never edit project code, configs or data; never run training, long jobs, installs, or git commands that change anything.
+- Finish within a few minutes of work. Do the tasks you are given and nothing else.
+- Change the map only through the atlas_update tool. Use full names; capitalise the first word of every label.
+
+Rendering a stage sample:
+- Find one real example of the stage's output (the code, caches, run folders or result files tell you where). Draw it in the form that fits its shape: an image or frame, a signal trace (a few channels, a short window), a heat map for a matrix, a short table rendered as an image for scalars.
+- Use a short Python script run with: uv run --quiet --with matplotlib --with numpy python -I <script>. Put the script in /tmp, not in the project.
+- Save the PNG at the path given in the task, Read it, and only then call atlas_update with stages: [{name, sample: <path>, note: <one line saying what is visible>}].
+- If you cannot find real data within a few tries, say so in the note and stop; never draw made-up data.
+
+Checking facts: compare pinned facts and the newest facts with the repository (git log, result and registry files). Fix wrong ones with atlas_update facts, and add a trail note saying what changed.
+
+Glossary: add any abbreviation, run-ID prefix or nickname from the recent turns that the glossary lacks.
+
+End with one short line saying what you did.`
+
+const KEEPER_EVERY_MS = 10 * 60_000
+const KEEPER_CHECK_TURNS = 15
+let keeperId: string | undefined
+let lastKeeperAt = 0
+let turnsSinceKeeper = 0
+
+/** Upkeep the map needs now: stages without a sample, and a periodic fact and glossary check. */
+function keeperTasks(map: AtlasMap, root: string): string[] {
+  const tasks: string[] = []
+  for (const st of map.stages.filter(x => x.sample === undefined && x.figure === undefined).slice(0, 2)) {
+    tasks.push(`Render a sample for the "${st.name}" stage${st.out ? ` (output ${st.out})` : ''} and save it at ${root}/${sampleRel(st.name)}.`)
+  }
+  if (turnsSinceKeeper >= KEEPER_CHECK_TURNS) tasks.push('Check the pinned facts against the repository, and add missing glossary entries from the recent turns.')
+  return tasks
+}
+
+async function startKeeper($: EngineInterface, tasks: string[]) {
+  if (tasks.length === 0 || (await read($, isKeeping))) return
+  const map = await read($, mapAtom)
+  const recent = turns.slice(-3).map((t, i) => `Turn ${i + 1}. User: ${t.prompt}\nActions: ${t.actions.join('; ')}\nAssistant: ${t.answer}`).join('\n\n')
+  const prompt = [
+    `Project root: ${projectRoot}`,
+    '',
+    'Tasks:',
+    ...tasks.map((t, i) => `${i + 1}. ${t}`),
+    '',
+    'The map now:',
+    toMarkdown(map, await read($, seen)),
+    '',
+    'Recent turns:',
+    recent || '(none)',
+  ].join('\n')
+  await update($, isKeeping, () => true)
+  lastKeeperAt = await $.clock.now()
+  turnsSinceKeeper = 0
+  try {
+    const r = await $.agent.spawn({ subagentType: 'atlas:keeper', prompt, description: 'atlas keeper' })
+    keeperId = r.agentId
+    if (!keeperId) await update($, isKeeping, () => false)
+  } catch {
+    await update($, isKeeping, () => false)
+  }
+}
+
 /** The cold-start instruction: the session that did the work builds its own map. */
 const BOOTSTRAP = `Build the atlas map for this project now (a cold start: the project already has history).
 1. Start from what you already know in this conversation: the goal, what has been done, what is in progress, what was tried and dropped, and what is waiting on me.
@@ -305,12 +370,7 @@ const BOOTSTRAP = `Build the atlas map for this project now (a cold start: the p
 4. Where your memory and the repository disagree, do not guess: add a trail note starting "Open question:" and list them for me at the end.
 Then show me the plan, in a few lines, as a tree.`
 
-/** What the stage buttons send: render a sample, or look at the one already there. */
-function sampleText(stage: AtlasStage): string {
-  const shape = stage.out ? ` Its output is ${stage.out}.` : ''
-  return `Render a sample of the "${stage.name}" pipeline stage's output.${shape} Load one real example, draw it in the form that fits its shape (an image or frame, a signal trace, a heat map for a matrix, a short table for scalars), show it with iris (id "stage-${stage.name}"), Read the PNG and say what is visible, then link it with atlas_update stages: [{name: "${stage.name}", figure: <the iris figure number>}].`
-}
-
+/** What the Look at it button sends. */
 function lookText(stage: AtlasStage): string {
   const what = stage.sample ? `the sample at ${projectRoot}/${stage.sample}` : `iris figure #${stage.figure}`
   return `Look at ${what} for the "${stage.name}" stage: Read the PNG and tell me what is actually visible and whether anything looks wrong.`
@@ -338,10 +398,26 @@ export const register: Register = on => {
     const term = (await $.env.get('TERM')) ?? ''
     hasImages = (await $.env.get('GHOSTTY_RESOURCES_DIR')) !== undefined || (await $.env.get('KITTY_WINDOW_ID')) !== undefined || /kitty|ghostty/.test(term)
     await $.tool.register({ name: 'atlas_update', description: MAP_DESCRIPTION, inputSchema: MAP_SCHEMA, isDeferred: false })
+    await $.agent
+      .register({
+        name: 'keeper',
+        description: 'Keeps the atlas map true in the background: renders missing stage samples, checks facts, fills the glossary.',
+        prompt: KEEPER_PROMPT,
+        tools: ['Read', 'Glob', 'Grep', 'Bash', TOOL],
+        model: 'sonnet',
+        maxTurns: 30,
+        background: true,
+        omitClaudeMd: true,
+      })
+      .catch(() => undefined)
+    await update($, isKeeping, () => false)
     await $.command.register({ name: 'atlas', description: 'Open the atlas map. /atlas init builds one for a project with history; /atlas reset clears it; /atlas recap runs a deep recap; /atlas project <path> switches project.', argumentHint: '[init | reset | recap | project <path>]' })
 
     return next(e)
   })
+
+  // The keeper is atlas's own: the main model never delegates to it.
+  on('agent.offer', { agent: 'atlas:keeper' }, () => ({ isOffered: false }))
 
   // ---- the model's side ----
 
@@ -411,7 +487,8 @@ export const register: Register = on => {
     const now = await $.clock.now()
     let isChanged = false
     const stages = map.stages.map(st => {
-      const isThis = (n !== undefined && st.figure === n) || (st.sample !== undefined && e.file_path === `${projectRoot}/${st.sample}`)
+      const isThis =
+        (n !== undefined && st.figure === n) || e.file_path === `${projectRoot}/${st.sample ?? sampleRel(st.name)}`
       if (!isThis) return st
       isChanged = true
       return { ...st, seenAt: now }
@@ -420,17 +497,47 @@ export const register: Register = on => {
     return result
   })
 
+  // A render shown with id "stage-<name>" (or titled like a stage) becomes that stage's sample at once.
+  on('tool.call', { tool: 'mcp__iris__show' }, async ($, e, next) => {
+    const result = await next(e)
+    if (result.deny !== undefined || result.isError) return result
+    const text = typeof result.result === 'string' ? result.result : (result.text ?? '')
+    const m = /as #(\d+) /.exec(text)
+    const args = e as unknown as { id?: string; title?: string }
+    if (!m) return result
+    const map = await read($, mapAtom)
+    const stage = map.stages.find(
+      st => args.id === `stage-${st.name}` || args.id === `stage-${slug(st.name)}` || (args.title ?? '').toLowerCase() === st.name.toLowerCase(),
+    )
+    if (!stage) return result
+    const linked = applyPatch(map, { stages: [{ name: stage.name, figure: Number(m[1]) }] }, await $.clock.now())
+    await save($, await storeSamples($, linked, [stage.name]))
+    return result
+  })
+
   // Research cache: remember lookups, and say so when one repeats.
   on('tool.call', { tool: 'WebSearch' }, ($, e, next) => remember($, e.tool, e.query, () => next(e)))
   on('tool.call', { tool: 'WebFetch' }, ($, e, next) => remember($, e.tool, `${e.url} ${e.prompt}`, () => next(e)))
 
   on('turn.complete', async ($, e, next) => {
+    if (e.agentId !== undefined && e.agentId === keeperId) {
+      keeperId = undefined
+      await update($, isKeeping, () => false)
+      const line = e.answer.trim().split('\n').pop()?.slice(0, 160) ?? ''
+      if (line !== '') $.ui.toast(`atlas keeper: ${line}`)
+      return next(e)
+    }
     if (e.agentId === undefined && !e.isAborted) {
+      turnsSinceKeeper += 1
       if ((await read($, changes)) > 0 && !isEmpty(await read($, mapAtom))) await update($, isStale, () => true)
       turns.push({ ...pending, answer: e.answer.slice(0, 900) })
       if (turns.length > 12) turns.shift()
       pending = { prompt: '', actions: [], answer: '' }
       void watch($, 'haiku', turns.slice(-2)).catch(() => undefined)
+      const map = await read($, mapAtom)
+      if (!isEmpty(map) && (await $.clock.now()) - lastKeeperAt > KEEPER_EVERY_MS) {
+        void startKeeper($, keeperTasks(map, projectRoot)).catch(() => undefined)
+      }
     }
     return next(e)
   })
@@ -494,6 +601,7 @@ export const register: Register = on => {
         <Box flexDirection="row" columnGap={1}>
           <Text wrap="truncate-end">{bandLine(map, stale, sel?.n)}</Text>
           {watching && <Text dimColor>◷</Text>}
+          {(await read($, isKeeping)) && <Text dimColor>⚙ Keeper</Text>}
           <Button key="open-atlas" plain dimColor label="Map" onPress={() => openPane($)} />
         </Box>
         {map.drift && (
@@ -767,7 +875,11 @@ export const register: Register = on => {
               )}
               {s.note && <Text dimColor>{s.note}</Text>}
               {!hasSample && (
-                <Button key={`sample-${i}`} label="Generate sample" onPress={() => $.prompt.submit({ text: sampleText(s), asUser: true })} />
+                <Button
+                  key={`sample-${i}`}
+                  label="Generate sample"
+                  onPress={() => startKeeper($, [`Render a sample for the "${s.name}" stage${s.out ? ` (output ${s.out})` : ''} and save it at ${projectRoot}/${sampleRel(s.name)}.`])}
+                />
               )}
               {hasSample && !isSeen && (
                 <Button key={`look-${i}`} label="Look at it" onPress={() => $.prompt.submit({ text: lookText(s), asUser: true })} />

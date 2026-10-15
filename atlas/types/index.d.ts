@@ -76,6 +76,8 @@ declare module 'claude-code' {
       isWatching: boolean
       /** The person chose "Not now" on the empty-map band this session. */
       isInitDismissed: boolean
+      /** True while the keeper agent is working in the background. */
+      isKeeping: boolean
     }
   }
 }
