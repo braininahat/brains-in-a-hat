@@ -136,7 +136,7 @@ const RED = '#E15759'
 const GREY = '#8C8C8C'
 const BROWN = '#9C755F'
 
-let storeKey = 'map:.'
+let projectRoot = '.'
 let workDir = '/tmp/atlas'
 let hasImages = false
 const dims = new Map<string, { w: number; h: number }>()
@@ -144,9 +144,35 @@ const dims = new Map<string, { w: number; h: number }>()
 const turns: Turn[] = []
 let pending: Turn = { prompt: '', actions: [], answer: '' }
 
+// Each project's map lives in its own repo, so it travels with git and reads the same on any machine.
+const mapFile = (root: string) => `${root}/.claude/atlas/map.json`
+const mapNotes = (root: string) => `${root}/.claude/atlas/map.md`
+
 async function save($: EngineInterface, map: AtlasMap) {
   await update($, mapAtom, () => map)
-  await $.store.set(storeKey, map)
+  await $.fs.write(mapFile(projectRoot), `${JSON.stringify(map, null, 2)}\n`)
+  const notes = isEmpty(map) ? '' : toMarkdown(map, await read($, seen))
+  await $.fs.write(mapNotes(projectRoot), `<!-- Written by atlas; change it with /atlas or atlas_update. -->\n# atlas map\n\n${notes}\n`)
+}
+
+/** A project's map: its repo file, else a map left in the old per-machine store (moved into the repo once). */
+async function load($: EngineInterface, root: string): Promise<AtlasMap> {
+  if (await $.fs.exists(mapFile(root))) {
+    try {
+      return migrate(JSON.parse(await $.fs.read(mapFile(root))))
+    } catch {
+      return migrate(undefined)
+    }
+  }
+  const legacy = await $.store.get(`map:${root}`)
+  const map = migrate(legacy)
+  if (!isEmpty(map)) {
+    const previous = projectRoot
+    projectRoot = root
+    await save($, map)
+    projectRoot = previous
+  }
+  return map
 }
 
 /** The iris PNG for figure `n`'s latest version and current page. */
@@ -270,11 +296,10 @@ function parkText(map: AtlasMap): string {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    storeKey = `map:${await $.session.root()}`
+    projectRoot = await $.session.root()
     workDir = `${(await $.env.get('TMPDIR')) ?? '/tmp'}/atlas-${await $.session.id()}`
-    await update($, mapAtom, () => migrate(undefined))
-    const stored = await $.store.get(storeKey)
-    await update($, mapAtom, () => migrate(stored))
+    const loaded = await load($, projectRoot)
+    await update($, mapAtom, () => loaded)
     const term = (await $.env.get('TERM')) ?? ''
     hasImages = (await $.env.get('GHOSTTY_RESOURCES_DIR')) !== undefined || (await $.env.get('KITTY_WINDOW_ID')) !== undefined || /kitty|ghostty/.test(term)
     await $.tool.register({ name: 'atlas_update', description: MAP_DESCRIPTION, inputSchema: MAP_SCHEMA, isDeferred: false })
@@ -378,9 +403,9 @@ export const register: Register = on => {
     if (arg.startsWith('project')) {
       const target = arg.slice('project'.length).trim()
       const root = target === '' ? await $.session.root() : target.replace(/\/+$/, '').replace(/^~(?=\/)/, (await $.env.get('HOME')) ?? '~')
-      storeKey = `map:${root}`
-      const stored = await $.store.get(storeKey)
-      await update($, mapAtom, () => migrate(stored))
+      const loaded = await load($, root)
+      projectRoot = root
+      await update($, mapAtom, () => loaded)
       await update($, changes, () => 0)
       await update($, isStale, () => false)
       turns.length = 0

@@ -6,6 +6,6 @@ A Claude Code **mod** that keeps a map of the work beside the transcript, so lon
 - **Watchdog.** After every turn a small model (Haiku) files the turn into the tree and refreshes a recap (where we are, what was learned, what is next). When work drifts, the band offers **Return**, **Keep going** and **Park**. `/atlas recap` runs a deeper recap on Sonnet.
 - **Pane** (`/atlas`): a route picture of the plan, Now and Recap cards, the plan tree, parked tangents, facts, pipeline stages with iris thumbnails (marked *Seen* once Claude has read the render), glossary and trail.
 - **Cold start.** In a project with history, `/atlas init` (or **Build map** in the band) asks the session's Claude to build the map from the conversation and the repository.
-- Maps are stored per project folder and survive restarts. `/atlas project <path>` shows another project's map.
+- Each project's map lives in that project's repo, as `.claude/atlas/map.json` plus a readable `map.md`, so it travels with `git clone` and reads the same on any machine. Commit it like any file (check your `.gitignore` does not exclude `.claude/`). `/atlas project <path>` shows another project's map.
 
 **Needs:** Claude Code ≥ 2.1.287, the iris mod, ImageMagick for the route picture.
