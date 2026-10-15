@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderChildren, Timer, ToolCallResult } from 'claude-code'
+import type { EngineInterface, ImageSource, Register, RenderChildren, Timer, ToolCallResult } from 'claude-code'
 
-import type { AtlasMap, AtlasNode, AtlasStage, AtlasTab } from '../types'
+import type { AtlasMap, AtlasNode, AtlasStage, AtlasTab, IrisImages } from '../types'
 import {
   age,
   applyPatch,
@@ -33,6 +33,9 @@ const isKeeping = atom({ plugin: 'atlas', key: 'isKeeping' } as const, false)
 // iris's state, read only: which figure the iris pane shows, and every figure's renders.
 const irisSel = atom({ plugin: 'iris', key: 'sel' } as const, null)
 const irisFigures = atom({ plugin: 'iris', key: 'figures' } as const, [])
+// How the viewing terminal shows pictures (see IrisImages): iris's answer, or atlas's own when atlas asked first.
+const irisImages = atom({ plugin: 'iris', key: 'images' } as const, 'unknown' as IrisImages)
+const images = atom({ plugin: 'atlas', key: 'images' } as const, 'unknown' as IrisImages)
 
 const RULES = `# atlas: keep the user oriented
 Long sessions drift: a big plan, a couple of steps done, then one step turns into its own search space and the session never returns to the top. The user may be a visual thinker who loses track of where things stand. The atlas map (goal, plan tree, facts, glossary, pipeline stages, parked tangents, trail) is shown beside the transcript and above the prompt. Keep it true with the atlas_update tool. The user is free to go anywhere; your job is to keep the books and the way back.
@@ -144,7 +147,8 @@ let sessionName = ''
 let fileMtime = 0
 const SESSION_MAX_AGE_MS = 14 * 86_400_000
 let workDir = '/tmp/atlas'
-let hasImages = false
+let probedAt = 0
+let probedViewport = ''
 const dims = new Map<string, { w: number; h: number }>()
 // The last few main-thread turns, as the watchdog reads them. Rebuilt after a reload.
 const turns: Turn[] = []
@@ -283,6 +287,42 @@ async function copySamples($: EngineInterface, linked: readonly { name: string; 
 function withSamples(map: AtlasMap, copied: ReadonlyMap<string, string>): AtlasMap {
   if (copied.size === 0) return map
   return { ...map, stages: map.stages.map(st => (copied.has(st.name) && st.figure !== undefined ? { ...st, sample: copied.get(st.name) } : st)) }
+}
+
+/** How to draw pictures for this viewer: atlas's own probe if it has one, else iris's; a new viewport asks again. */
+async function imageMode($: EngineInterface, viewport: { columns: number; rows: number } | undefined): Promise<IrisImages> {
+  const vp = `${viewport?.columns}x${viewport?.rows}`
+  if (vp !== probedViewport) {
+    probedViewport = vp
+    await update($, images, () => 'unknown' as IrisImages)
+  }
+  const own = await read($, images)
+  return own !== 'unknown' ? own : read($, irisImages)
+}
+
+/** An Image source for a PNG in the form this viewer reads. */
+async function sourceOf($: EngineInterface, png: string, how: IrisImages): Promise<ImageSource> {
+  return how === 'bytes' ? { png: (await $.fs.read(png, { as: 'bytes' })).base64 } : { file: png, format: 'png' }
+}
+
+/** Asks the renderer how an Image atlas drew came out (the session's environment is not its viewer's). */
+async function probeImages($: EngineInterface, key: string, source: ImageSource, columns: number, rows: number) {
+  const now = await $.clock.now()
+  if (now - probedAt < 2000) return
+  probedAt = now
+  await $.clock.sleep(300)
+  const r = await $.ui.blit({ requestId: PANE, key, source, columns, rows }).catch(() => ({ deny: 'failed' }))
+  const deny = r.deny ?? ''
+  const was = await read($, images)
+  let next = was
+  if (deny === '') next = 'png' in source ? 'bytes' : 'file'
+  else if (/cannot read files/.test(deny)) next = 'bytes'
+  else if (/draws its alt|not drawn under a terminal/.test(deny) && !/in use/.test(deny)) next = 'none'
+  else if (/blit again/.test(deny)) probedAt = 0
+  if (next !== was) {
+    await update($, images, () => next)
+    $.ui.invalidate('ui.render')
+  }
 }
 
 /** The iris PNG for figure `n`'s latest version and current page. */
@@ -532,8 +572,6 @@ export const register: Register = on => {
     workDir = `${(await $.env.get('TMPDIR')) ?? '/tmp'}/atlas-${sessionId}`
     const loaded = await load($, projectRoot)
     await update($, mapAtom, () => loaded)
-    const term = (await $.env.get('TERM')) ?? ''
-    hasImages = (await $.env.get('GHOSTTY_RESOURCES_DIR')) !== undefined || (await $.env.get('KITTY_WINDOW_ID')) !== undefined || /kitty|ghostty/.test(term)
     await $.tool.register({ name: 'atlas_update', description: MAP_DESCRIPTION, inputSchema: MAP_SCHEMA, isDeferred: false })
     await $.agent
       .register({
@@ -848,14 +886,18 @@ export const register: Register = on => {
         </Box>
       ))
     }
+    const how = e.surface === 'terminal' ? await imageMode($, e.viewport) : 'none'
     const routeImage = async (key: string, steps: AtlasNode[], at: number, prefix: string) => {
-      if (!hasImages || e.surface !== 'terminal' || steps.length === 0) return null
+      if (how === 'none' || e.surface !== 'terminal' || steps.length === 0) return null
       const png = await routePng($, steps, at, prefix).catch(() => undefined)
       if (!png) return null
       const { Image } = $.ui.resolve(e)
       const cols = Math.min(width, 255)
       const rows = Math.max(3, Math.round((cols * ROUTE_H) / ROUTE_W / 2))
-      return <Image key={`${key}-${png.slice(-14)}-${cols}x${rows}`} source={{ file: png, format: 'png' }} columns={cols} rows={rows} alt="Plan route" />
+      const id = `${key}-${png.slice(-14)}-${cols}x${rows}`
+      const source = await sourceOf($, png, how)
+      void probeImages($, id, source, cols, rows).catch(() => undefined)
+      return <Image key={id} source={source} columns={cols} rows={rows} alt="Plan route" />
     }
     const now = await $.clock.now()
 
@@ -1013,7 +1055,9 @@ export const register: Register = on => {
         const isSeen = s.seenAt !== undefined || (s.figure !== undefined && looked.includes(s.figure))
         const colour = !hasSample ? GREY : isSeen ? GREEN : ORANGE
         let thumb = null
-        if (hasImages && e.surface === 'terminal' && hasSample) {
+        if (how === 'none' && hasSample && e.surface === 'terminal') {
+          thumb = <Text dimColor>This terminal shows no pictures; Look at it describes the sample, or open {s.sample ?? `figure #${s.figure}`}.</Text>
+        } else if (hasSample && e.surface === 'terminal') {
           const stored = s.sample ? `${projectRoot}/${s.sample}` : undefined
           const png = stored && (await $.fs.exists(stored)) ? stored : s.figure !== undefined ? await irisPng($, s.figure) : undefined
           const d = png ? await pngDims($, png).catch(() => undefined) : undefined
@@ -1025,7 +1069,10 @@ export const register: Register = on => {
               rows = 14
               cols = Math.max(1, Math.round((rows * 2 * d.w) / d.h))
             }
-            thumb = <Image key={`thumb-${i}-${cols}x${rows}`} source={{ file: png, format: 'png' }} columns={cols} rows={rows} alt={`Figure #${s.figure}`} />
+            const id = `thumb-${i}-${cols}x${rows}`
+            const source = await sourceOf($, png, how)
+            void probeImages($, id, source, cols, rows).catch(() => undefined)
+            thumb = <Image key={id} source={source} columns={cols} rows={rows} alt={`${s.name} sample`} />
           }
         }
         if (i > 0) cards.push(<Text key={`arrow-${i}`} color={GREY}>{'  ↓'}</Text>)

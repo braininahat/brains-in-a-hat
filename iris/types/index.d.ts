@@ -34,6 +34,14 @@ export type IrisSelection = { n: number; v: number } | null
 /** In-pane zoom: z = 1 fits the whole image; cx, cy are the view's centre as fractions. */
 export type IrisZoom = { z: number; cx: number; cy: number }
 
+/**
+ * How the terminal that views the session shows an Image, learned by asking the renderer (not from the
+ * environment: a background session's environment is not its viewer's). file: pixels from a path;
+ * bytes: pixels only when sent as PNG bytes (the viewer cannot read this machine's files); none: no
+ * pixels, so draw half-block cells; unknown: not asked yet.
+ */
+export type IrisImages = 'unknown' | 'file' | 'bytes' | 'none'
+
 declare module 'claude-code' {
   interface PluginState {
     iris: {
@@ -41,6 +49,7 @@ declare module 'claude-code' {
       sel: IrisSelection
       view: 'preview' | 'source'
       zoom: IrisZoom
+      images: IrisImages
     }
   }
 }

@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, ImageSource, Register } from 'claude-code'
 
-import type { IrisFigure, IrisVersion, IrisZoom } from '../types'
+import type { IrisFigure, IrisImages, IrisVersion, IrisZoom } from '../types'
 import { basename, convert, crop, dimsOf, dirname, extOf, fitCells, rasterize, renderPdfPage, TEXT_EXTS } from './render'
 import type { RasterCells } from './raster'
 
@@ -13,6 +13,7 @@ const sel = atom({ plugin: 'iris', key: 'sel' } as const, null)
 const view = atom({ plugin: 'iris', key: 'view' } as const, 'preview')
 const FIT: IrisZoom = { z: 1, cx: 0.5, cy: 0.5 }
 const zoom = atom({ plugin: 'iris', key: 'zoom' } as const, FIT)
+const images = atom({ plugin: 'iris', key: 'images' } as const, 'unknown' as IrisImages)
 
 const SHOW_DESCRIPTION = [
   'Show a diagram or image to the user in the iris side pane, and get back a PNG of what they see.',
@@ -70,7 +71,9 @@ let isPolling = false
 const renderLog: string[] = []
 // /show probe: draw the image as a file source and as PNG bytes, to compare how the terminal scales each.
 let isProbe = false
-let hasImages = false
+// When the renderer was last asked how an Image came out, and the viewport it was asked for.
+let probedAt = 0
+let probedViewport = ''
 const failedMtime = new Map<number, number>()
 const rasters = new Map<string, RasterCells | string>()
 const dims = new Map<string, { w: number; h: number }>()
@@ -161,7 +164,7 @@ async function show($: EngineInterface, args: ShowArgs, isFromWatch = false): Pr
     $.ui.toast(`iris: #${n} ${fig.title} v${v} ready. /show to view`)
   }
   // Where the pane shows real pixels the full image is already in view; elsewhere open it once per figure.
-  if (v === 1 && !isFromWatch && !hasImages) {
+  if (v === 1 && !isFromWatch && (await read($, images)) === 'none') {
     await openExternal($, `${dir}/current.png`)
   }
   return { fig, version, png: rendered.png }
@@ -246,12 +249,42 @@ async function rasterFor($: EngineInterface, png: string, columns: number, maxRo
 }
 
 /** Terminals that draw real pixels (kitty graphics protocol). */
-async function detectImages($: EngineInterface) {
-  const term = (await $.env.get('TERM')) ?? ''
-  const program = (await $.env.get('TERM_PROGRAM')) ?? ''
-  const isKitty = (await $.env.get('KITTY_WINDOW_ID')) !== undefined
-  const isGhostty = (await $.env.get('GHOSTTY_RESOURCES_DIR')) !== undefined
-  return isKitty || isGhostty || /kitty|ghostty/i.test(term) || /ghostty/i.test(program)
+/**
+ * Asks the renderer how the Image just drawn came out, and switches to what the viewing terminal can show.
+ * The session's own environment says nothing about this: a background session is viewed from another terminal.
+ */
+async function probeImages($: EngineInterface, key: string, source: ImageSource, box: { columns: number; rows: number }) {
+  const now = await $.clock.now()
+  if (now - probedAt < 2000) return
+  probedAt = now
+  await $.clock.sleep(300) // let the frame holding the Image land first
+  const r = await $.ui.blit({ requestId: PANE, key, source, columns: box.columns, rows: box.rows }).catch(() => ({ deny: 'failed' }))
+  const deny = r.deny ?? ''
+  const was = await read($, images)
+  let next = was
+  if (deny === '') next = 'png' in source ? 'bytes' : 'file'
+  // "this terminal cannot read files on this machine ... bytes still draw"
+  else if (/cannot read files/.test(deny)) next = 'bytes'
+  // "the terminal draws no placeholder images"; not "every image id is in use", which passes
+  else if (/draws its alt|not drawn under a terminal/.test(deny) && !/in use/.test(deny)) next = 'none'
+  // "has not yet said whether it reads files ... asked now, blit again"
+  else if (/blit again/.test(deny)) probedAt = 0
+  if (next !== was) {
+    await update($, images, () => next)
+    $.ui.invalidate('ui.render')
+    // One line per change, so how a viewer was judged can be checked afterwards.
+    await sh($, ['sh', '-c', 'printf "%s %s -> %s (%s)\\n" "$(date -Is)" "$1" "$2" "$3" >> "$4"', 'iris', was, next, deny || 'drawn', `${base}/images.log`]).catch(() => undefined)
+  }
+}
+
+/** Whether to draw an Image: yes unless this viewer showed none. A new viewport may be a new viewer, so ask again. */
+async function imagesFor($: EngineInterface, viewport: { columns: number; rows: number } | undefined): Promise<boolean> {
+  const vp = `${viewport?.columns}x${viewport?.rows}`
+  if (vp !== probedViewport) {
+    probedViewport = vp
+    if ((await read($, images)) === 'none') await update($, images, () => 'unknown' as IrisImages)
+  }
+  return (await read($, images)) !== 'none'
 }
 
 async function cachedDims($: EngineInterface, file: string) {
@@ -299,7 +332,6 @@ async function sourceText($: EngineInterface, fig: IrisFigure) {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     cwd = e.cwd
-    hasImages = await detectImages($)
     base = `${(await $.env.get('TMPDIR')) ?? '/tmp'}/iris-${await $.session.id()}`
     await ensureBase($)
     // Renders outlive the process so a resumed session keeps its figures; old ones are pruned here.
@@ -407,7 +439,8 @@ export const register: Register = on => {
       const shown = await zoomed($, png, z).catch(() => undefined)
       if (!shown) {
         body = <Text dimColor>Preview failed. Press o to open the file.</Text>
-      } else if (hasImages) {
+      } else if (await imagesFor($, e.viewport)) {
+        const how = await read($, images)
         const { Image } = $.ui.resolve(e)
         const box = fitCells(shown.w, shown.h, columns, fitRows)
         indent = Math.max(0, Math.floor((columns - box.columns) / 2))
@@ -427,17 +460,13 @@ export const register: Register = on => {
         )
         if (renderLog.length > 40) renderLog.shift()
         if (isProbe) void $.fs.write(`${base}/render-log.jsonl`, renderLog.join('\n') + '\n')
-        body = (
-          <Image
-            // A keyed Image keeps its first placement size; a new key per box size makes a resize re-place it.
-            key={`preview-${box.columns}x${box.rows}`}
-            // Same file at a new size must be re-sent: a source equal to the last one sends nothing.
-            source={{ file: shown.file, format: 'png', generation: box.columns * 1000 + box.rows }}
-            columns={box.columns}
-            rows={box.rows}
-            alt={`#${fig.n} ${fig.title} (press o to open)`}
-          />
-        )
+        // A keyed Image keeps its first placement size; a new key per box size makes a resize re-place it.
+        const key = `preview-${box.columns}x${box.rows}`
+        // Same file at a new size must be re-sent: a source equal to the last one sends nothing.
+        const source: ImageSource =
+          how === 'bytes' ? { png: (await $.fs.read(shown.file, { as: 'bytes' })).base64 } : { file: shown.file, format: 'png', generation: box.columns * 1000 + box.rows }
+        body = <Image key={key} source={source} columns={box.columns} rows={box.rows} alt={`#${fig.n} ${fig.title} (press o to open)`} />
+        void probeImages($, key, source, box).catch(() => undefined)
         if (isProbe) {
           const half = fitCells(shown.w, shown.h, columns, Math.max(4, Math.floor(fitRows / 2) - 2))
           const { base64 } = await $.fs.read(shown.file, { as: 'bytes' })

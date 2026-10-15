@@ -66,6 +66,9 @@ export type AtlasSession = { name: string; focus: string[]; t: number }
 
 export type AtlasTab = 'map' | 'pipeline' | 'glossary' | 'trail'
 
+/** How the viewing terminal shows an Image: from a file path, only as PNG bytes, not at all, or not asked yet. Mirrors iris's type. */
+export type IrisImages = 'unknown' | 'file' | 'bytes' | 'none'
+
 declare module 'claude-code' {
   interface PluginState {
     atlas: {
@@ -82,6 +85,8 @@ declare module 'claude-code' {
       isInitDismissed: boolean
       /** True while the keeper agent is working in the background. */
       isKeeping: boolean
+      /** How the viewing terminal shows pictures, as atlas's own probe found (same values as iris's). */
+      images: IrisImages
     }
   }
 }
