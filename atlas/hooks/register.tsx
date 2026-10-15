@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderChildren, ToolCallResult } from 'claude-code'
+import type { EngineInterface, Register, RenderChildren, Timer, ToolCallResult } from 'claude-code'
 
 import type { AtlasMap, AtlasNode, AtlasStage, AtlasTab } from '../types'
 import {
@@ -139,6 +139,10 @@ const GREY = '#8C8C8C'
 const BROWN = '#9C755F'
 
 let projectRoot = '.'
+let sessionId = ''
+let sessionName = ''
+let fileMtime = 0
+const SESSION_MAX_AGE_MS = 14 * 86_400_000
 let workDir = '/tmp/atlas'
 let hasImages = false
 const dims = new Map<string, { w: number; h: number }>()
@@ -150,18 +154,61 @@ let pending: Turn = { prompt: '', actions: [], answer: '' }
 const mapFile = (root: string) => `${root}/.claude/atlas/map.json`
 const mapNotes = (root: string) => `${root}/.claude/atlas/map.md`
 
+/** The map as this session sees it: the shared plan, with this session's own position as the focus. */
+function withMyFocus(map: AtlasMap): AtlasMap {
+  const mine = map.sessions?.[sessionId]
+  return mine ? { ...map, focus: mine.focus } : map
+}
+
 async function save($: EngineInterface, map: AtlasMap) {
+  const now = await $.clock.now()
+  const sessions = Object.fromEntries(Object.entries(map.sessions ?? {}).filter(([, v]) => now - v.t < SESSION_MAX_AGE_MS))
+  if (sessionId !== '') sessions[sessionId] = { name: sessionName || sessionId.slice(0, 8), focus: map.focus, t: now }
+  map = { ...map, sessions }
   await update($, mapAtom, () => map)
   await $.fs.write(mapFile(projectRoot), `${JSON.stringify(map, null, 2)}\n`)
+  fileMtime = (await $.fs.stat(mapFile(projectRoot)).catch(() => undefined))?.mtimeMs ?? fileMtime
   const notes = isEmpty(map) ? '' : toMarkdown(map, await read($, seen))
   await $.fs.write(mapNotes(projectRoot), `<!-- Written by atlas; change it with /atlas or atlas_update. -->\n# atlas map\n\n${notes}\n`)
+}
+
+/** The newest map: re-read from disk when another session wrote it since we last did. */
+async function latest($: EngineInterface): Promise<AtlasMap> {
+  const st = await $.fs.stat(mapFile(projectRoot)).catch(() => undefined)
+  if (st && st.mtimeMs !== fileMtime) {
+    try {
+      const map = withMyFocus(migrate(JSON.parse(await $.fs.read(mapFile(projectRoot)))))
+      fileMtime = st.mtimeMs
+      await update($, mapAtom, () => map)
+      return map
+    } catch {
+      // A half-written file: keep what we have and try again next time.
+    }
+  }
+  return read($, mapAtom)
+}
+
+/** Every change goes through here, so changes from several sessions merge instead of overwriting. */
+async function mutate($: EngineInterface, change: (map: AtlasMap) => AtlasMap | Promise<AtlasMap>): Promise<AtlasMap> {
+  const next = await change(await latest($))
+  await save($, next)
+  return next
+}
+
+/** This session's display name, from its transcript (custom title or agent name). */
+async function readSessionName($: EngineInterface, root: string, id: string): Promise<string> {
+  const file = `${(await $.env.get('HOME')) ?? ''}/.claude/projects/${root.replace(/[^A-Za-z0-9]/g, '-')}/${id}.jsonl`
+  const script = `grep -oE '"(customTitle|agentName)":"[^"]*"' "$1" 2>/dev/null | tail -1 | sed -E 's/.*":"//; s/"$//'`
+  const out = await $.process.run(['sh', '-c', script, 'atlas', file], { timeoutMs: 10_000 }).catch(() => undefined)
+  return out?.stdout.trim() ?? ''
 }
 
 /** A project's map: its repo file, else a map left in the old per-machine store (moved into the repo once). */
 async function load($: EngineInterface, root: string): Promise<AtlasMap> {
   if (await $.fs.exists(mapFile(root))) {
     try {
-      return migrate(JSON.parse(await $.fs.read(mapFile(root))))
+      fileMtime = (await $.fs.stat(mapFile(root))).mtimeMs
+      return withMyFocus(migrate(JSON.parse(await $.fs.read(mapFile(root)))))
     } catch {
       return migrate(undefined)
     }
@@ -226,8 +273,7 @@ async function remember<R extends ToolCallResult>($: EngineInterface, tool: stri
   if (result.deny !== undefined || result.isError) return result
   const now = await $.clock.now()
   const entry = { t: now, tool, query, summary: (result.text ?? '').replace(/\s+/g, ' ').slice(0, 300) }
-  const latest = await read($, mapAtom)
-  await save($, { ...latest, research: [...latest.research.filter(r => r.query !== query), entry].slice(-RESEARCH_LIMIT) })
+  await mutate($, m => ({ ...m, research: [...m.research.filter(r => r.query !== query), entry].slice(-RESEARCH_LIMIT) }))
   if (!before) return result
   return { ...result, context: [...(result.context ?? []), `atlas: the same lookup was made ${age(now, before.t)}: ${before.summary}`] }
 }
@@ -282,10 +328,12 @@ async function watch($: EngineInterface, model: string, recent: Turn[]) {
     if (!reply.isAnswered) return
     const patch = parseWatch(reply.text)
     if (!patch) return
-    const latest = await read($, mapAtom)
-    const next = applyPatch(latest, patch, await $.clock.now())
-    if (patch.recap && next.recap) next.recap = { ...next.recap, by: model === 'haiku' ? 'Haiku' : 'Sonnet' }
-    await save($, next)
+    const now = await $.clock.now()
+    await mutate($, m => {
+      const next = applyPatch(m, patch, now)
+      if (patch.recap && next.recap) next.recap = { ...next.recap, by: model === 'haiku' ? 'Haiku' : 'Sonnet' }
+      return next
+    })
   } finally {
     await update($, isWatching, () => false)
   }
@@ -313,6 +361,7 @@ End with one short line saying what you did.`
 const KEEPER_EVERY_MS = 10 * 60_000
 const KEEPER_CHECK_TURNS = 15
 let keeperId: string | undefined
+let refreshTimer: Timer | undefined
 let lastKeeperAt = 0
 let turnsSinceKeeper = 0
 
@@ -361,21 +410,63 @@ async function startKeeper($: EngineInterface, tasks: string[]) {
   }
 }
 
-/** The cold-start instruction: the session that did the work builds its own map. */
-const BOOTSTRAP = `Build the atlas map for this project now (a cold start: the project already has history).
-1. Start from what you already know in this conversation: the goal, what has been done, what is in progress, what was tried and dropped, and what is waiting on me.
-2. Check and fill gaps from the repository with a quick read: README or context docs, backlog or notes, recent git log and branches, run or result records, uncommitted changes. Do not read everything; aim for the shape of the project.
-3. Write it with atlas_update, in a few calls:
-   - goal (one line, with the target and deadline if there is one)
-   - steps: the top-level plan with done and in-progress marked (step_updates with one-line outcomes for finished steps); then focus on where the work actually is now, with substeps for the branch the work drilled into, and detours for side work that left its step
-   - facts: datasets and versions, input and output shapes and dtypes, splits, key paths, best scores and which run produced them, deadlines; pin the three that matter most right now
-   - stages: the pipeline from raw data to the final artefact, with the shape or format in and out of each stage
-   - glossary: every abbreviation, run-ID prefix and nickname in use, with its meaning
-   - trail: decisions and dead ends, one line each
-   - park: open threads and tangents that are not the current focus
-   - recap: where we are, the most useful thing learned, the next concrete step and how it leads back to the top-level plan
-4. Where your memory and the repository disagree, do not guess: add a trail note starting "Open question:" and list them for me at the end.
-Then show me the plan, in a few lines, as a tree.`
+const HISTORIAN_PROMPT = `You are the atlas historian. You read one chunk of a project's past Claude Code conversations (the user's and Claude's words, plus one line per tool call; tool output is cut) and write down what happened, so the main session can rebuild the project's map without rereading everything.
+
+Read the whole chunk file you are given (in parts if it is long). Do not read anything else. Do not write or change any file.
+
+Reply with only these sections, dated where the chunk gives a time, in plain full words (no new abbreviations; explain any that the chunk uses):
+- Goals: what the user was trying to achieve, and any deadlines or targets.
+- Steps: the work done, in order, each with its result (numbers, scores, shapes, paths, run names exactly as written).
+- Decisions: what was chosen over what, and why.
+- Dead ends: what was tried and dropped, with the numbers that killed it.
+- Facts: datasets and versions, input and output shapes, splits, key paths, best scores and which run produced them.
+- Open threads: what was left unfinished, running, or waiting on the user at the end of the chunk.
+- Terms: abbreviations, run-ID prefixes and nicknames, with their meanings.
+- Conflicts: places where the conversation contradicts itself (say which came later).
+
+Keep it under 900 words. Leave out chat, tooling trouble and anything that did not change the project.`
+
+/** The cold-start instruction: rebuild the map from the conversation, past transcripts, memory and the repository. */
+function bootstrapText(history: { chunks: { file: string; from: string; to: string }[]; memory: string[]; transcripts: number } | undefined): string {
+  const past = history && history.chunks.length > 0
+    ? [
+        `2. Read the project's history. Its ${history.transcripts} past transcripts are digested into ${history.chunks.length} chunks, oldest first:`,
+        ...history.chunks.map((c, i) => `   ${i + 1}. ${c.file} (${c.from} to ${c.to})`),
+        '   Hand each chunk to its own atlas:historian agent (Agent tool, subagent_type "atlas:historian", prompt: the chunk path), several in one message so they run in parallel. Do not read the chunks yourself.',
+        ...(history.memory.length > 0 ? ['   Also read the project memory notes:', ...history.memory.map(m => `   - ${m}`)] : []),
+      ]
+    : ['2. There are no past transcripts for this project; skip to the repository.']
+  return [
+    'Build the atlas map for this project now (a cold start: the project already has history).',
+    '1. Start from what you already know in this conversation: the goal, what has been done, what is in progress, what was tried and dropped, and what is waiting on me.',
+    ...past,
+    '3. Check and fill gaps from the repository with a quick read: README or context docs, backlog or notes, recent git log and branches, run or result records, uncommitted changes. Do not read everything; aim for the shape of the project. Where history and the repository disagree, the newer source usually wins, but say so.',
+    '4. Write it with atlas_update, in a few calls:',
+    '   - goal (one line, with the target and deadline if there is one)',
+    '   - steps: the top-level plan with done and in-progress marked (step_updates with one-line outcomes for finished steps); then focus on where the work actually is now, with substeps for the branch the work drilled into, and detours for side work that left its step',
+    '   - facts: datasets and versions, input and output shapes and dtypes, splits, key paths, best scores and which run produced them, deadlines; pin the three that matter most right now',
+    '   - stages: the pipeline from raw data to the final artefact, with the shape or format in and out of each stage',
+    '   - glossary: every abbreviation, run-ID prefix and nickname in use, with its meaning',
+    '   - trail: decisions and dead ends, one line each, oldest first',
+    '   - park: open threads and tangents that are not the current focus',
+    '   - recap: where we are, the most useful thing learned, the next concrete step and how it leads back to the top-level plan',
+    '5. Where sources disagree and you cannot tell which is right, do not guess: add a trail note starting "Open question:" and list them for me at the end.',
+    'Then show me the plan, in a few lines, as a tree.',
+  ].join('\n')
+}
+
+/** Digest the project's past transcripts, then ask the main session to build the map from them. */
+async function startInit($: EngineInterface) {
+  const out = `${workDir}/history`
+  let history
+  try {
+    const r = await $.process.run(['python3', '-I', `${$.plugin.root}/scripts/digest.py`, projectRoot, out], { timeoutMs: 300_000 })
+    if (r.exitCode === 0) history = JSON.parse(await $.fs.read(`${out}/index.json`))
+  } catch {
+    // No history to read: build from the conversation and the repository alone.
+  }
+  await $.prompt.submit({ text: bootstrapText(history), asUser: true })
+}
 
 /** What the Look at it button sends. */
 function lookText(stage: AtlasStage): string {
@@ -399,7 +490,9 @@ function parkText(map: AtlasMap): string {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     projectRoot = await $.session.root()
-    workDir = `${(await $.env.get('TMPDIR')) ?? '/tmp'}/atlas-${await $.session.id()}`
+    sessionId = await $.session.id()
+    sessionName = await readSessionName($, projectRoot, sessionId)
+    workDir = `${(await $.env.get('TMPDIR')) ?? '/tmp'}/atlas-${sessionId}`
     const loaded = await load($, projectRoot)
     await update($, mapAtom, () => loaded)
     const term = (await $.env.get('TERM')) ?? ''
@@ -417,7 +510,21 @@ export const register: Register = on => {
         omitClaudeMd: true,
       })
       .catch(() => undefined)
+    await $.agent
+      .register({
+        name: 'historian',
+        description: 'Summarises one chunk of a project\'s past transcripts for /atlas init: goals, steps with results, decisions, dead ends, facts, open threads, terms.',
+        prompt: HISTORIAN_PROMPT,
+        tools: ['Read'],
+        model: 'sonnet',
+        maxTurns: 12,
+        omitClaudeMd: true,
+      })
+      .catch(() => undefined)
     await update($, isKeeping, () => false)
+    // Other sessions on this project write the same map; pick their changes up within a few seconds.
+    refreshTimer?.cancel()
+    refreshTimer = $.clock.every(3000, () => void latest($).catch(() => undefined))
     await $.command.register({ name: 'atlas', description: 'Open the atlas map. /atlas init builds one for a project with history; /atlas reset clears it; /atlas recap runs a deep recap; /atlas project <path> switches project.', argumentHint: '[init | reset | recap | project <path>]' })
 
     return next(e)
@@ -459,11 +566,10 @@ export const register: Register = on => {
 
   on('tool.call', { tool: TOOL }, async ($, e) => {
     const { tool: _t, tool_use_id: _id, ...patch } = e as unknown as Patch & { tool: string; tool_use_id: string }
-    const map = await read($, mapAtom)
-    if (Object.keys(patch).length === 0) return { result: toMarkdown(map, await read($, seen)) }
+    if (Object.keys(patch).length === 0) return { result: toMarkdown(await latest($), await read($, seen)) }
     const linked = (patch.stages ?? []).filter(st => st.figure !== undefined).map(st => st.name)
-    const next = await storeSamples($, applyPatch(map, patch, await $.clock.now()), linked)
-    await save($, next)
+    const now = await $.clock.now()
+    const next = await mutate($, m => storeSamples($, applyPatch(m, patch, now), linked))
     await update($, changes, () => 0)
     await update($, isStale, () => false)
     return { result: `Map updated. Above the prompt: ${bandLine(next, false) || '(nothing pinned yet)'}` }
@@ -490,7 +596,7 @@ export const register: Register = on => {
     const n = m ? Number(m[1]) : undefined
     if (n !== undefined) await update($, seen, list => (list.includes(n) ? list : [...list, n]))
     // Looking at a stage's render, or at its stored sample, marks that stage seen in the saved map.
-    const map = await read($, mapAtom)
+    const map = await latest($)
     const now = await $.clock.now()
     let isChanged = false
     const stages = map.stages.map(st => {
@@ -500,7 +606,10 @@ export const register: Register = on => {
       isChanged = true
       return { ...st, seenAt: now }
     })
-    if (isChanged) await save($, { ...map, stages })
+    if (isChanged) {
+      const hit = new Set(stages.filter(st => st.seenAt === now).map(st => st.name))
+      await mutate($, m => ({ ...m, stages: m.stages.map(st => (hit.has(st.name) ? { ...st, seenAt: now } : st)) }))
+    }
     return result
   })
 
@@ -512,13 +621,13 @@ export const register: Register = on => {
     const m = /as #(\d+) /.exec(text)
     const args = e as unknown as { id?: string; title?: string }
     if (!m) return result
-    const map = await read($, mapAtom)
+    const map = await latest($)
     const stage = map.stages.find(
       st => args.id === `stage-${st.name}` || args.id === `stage-${slug(st.name)}` || (args.title ?? '').toLowerCase() === st.name.toLowerCase(),
     )
     if (!stage) return result
-    const linked = applyPatch(map, { stages: [{ name: stage.name, figure: Number(m[1]) }] }, await $.clock.now())
-    await save($, await storeSamples($, linked, [stage.name]))
+    const now = await $.clock.now()
+    await mutate($, mm => storeSamples($, applyPatch(mm, { stages: [{ name: stage.name, figure: Number(m[1]) }] }, now), [stage.name]))
     return result
   })
 
@@ -560,9 +669,9 @@ export const register: Register = on => {
       return { text: 'atlas: this project\'s map is cleared.' }
     }
     if (arg === 'init') {
-      void $.prompt.submit({ text: BOOTSTRAP, asUser: true })
+      void startInit($)
       await openPane($)
-      return { text: 'atlas: building this project\'s map from the conversation and the repository.' }
+      return { text: 'atlas: building this project\'s map from past transcripts, memory notes, the conversation and the repository.' }
     }
     if (arg.startsWith('project')) {
       const target = arg.slice('project'.length).trim()
@@ -594,7 +703,7 @@ export const register: Register = on => {
       return (
         <Box flexDirection="row" columnGap={1}>
           <Text dimColor>atlas: no map for this project yet.</Text>
-          <Button key="atlas-init" label="Build map" onPress={() => $.prompt.submit({ text: BOOTSTRAP, asUser: true })} />
+          <Button key="atlas-init" label="Build map" onPress={() => void startInit($)} />
           <Button key="atlas-later" plain dimColor label="Not now" onPress={() => update($, isInitDismissed, () => true)} />
         </Box>
       )
@@ -619,9 +728,10 @@ export const register: Register = on => {
               key="drift-keep"
               label="Keep going"
               onPress={async () => {
-                const latest = await read($, mapAtom)
-                const nodeId = latest.drift?.nodeId
-                await save($, { ...latest, drift: null, keepGoing: nodeId ? [...latest.keepGoing, nodeId] : latest.keepGoing })
+                await mutate($, m => {
+                  const nodeId = m.drift?.nodeId
+                  return { ...m, drift: null, keepGoing: nodeId ? [...m.keepGoing, nodeId] : m.keepGoing }
+                })
               }}
             />
             <Button key="drift-park" label="Park" onPress={() => $.prompt.submit({ text: parkText(map), asUser: true })} />
@@ -760,6 +870,10 @@ export const register: Register = on => {
       }
       walk(map.plan, '', 0)
       const recap = map.recap
+      // Other sessions working on this project, and where each one is in the shared plan.
+      const otherSessions = Object.entries(map.sessions ?? {})
+        .filter(([id]) => id !== sessionId)
+        .sort((x, y) => y[1].t - x[1].t)
       body = (
         <Box flexDirection="column">
           {map.goal !== '' && <Text bold>{map.goal}</Text>}
@@ -778,9 +892,10 @@ export const register: Register = on => {
                     key="pane-keep"
                     label="Keep going"
                     onPress={async () => {
-                      const latest = await read($, mapAtom)
-                      const nodeId = latest.drift?.nodeId
-                      await save($, { ...latest, drift: null, keepGoing: nodeId ? [...latest.keepGoing, nodeId] : latest.keepGoing })
+                      await mutate($, m => {
+                        const nodeId = m.drift?.nodeId
+                        return { ...m, drift: null, keepGoing: nodeId ? [...m.keepGoing, nodeId] : m.keepGoing }
+                      })
                     }}
                   />
                   <Button key="pane-park" label="Park" onPress={() => $.prompt.submit({ text: parkText(map), asUser: true })} />
@@ -796,6 +911,17 @@ export const register: Register = on => {
                 <Text bold>{here.title}</Text>
                 {here.why && <Text dimColor>Why: {here.why}</Text>}
               </Box>,
+            )}
+          {otherSessions.length > 0 &&
+            card(
+              'sessions',
+              `Sessions (${otherSessions.length + 1})`,
+              GREY,
+              otherSessions.map(([id, ss]) => (
+                <Text key={`session-${id}`}>
+                  <Text bold>{ss.name}</Text> · {breadcrumb({ ...map, focus: ss.focus }) || 'No step'} <Text dimColor>· {age(now, ss.t)}</Text>
+                </Text>
+              )),
             )}
           {recap &&
             card(

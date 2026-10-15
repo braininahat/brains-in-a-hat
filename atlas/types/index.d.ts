@@ -58,7 +58,11 @@ export type AtlasMap = {
   drift: AtlasDrift | null
   /** Node ids the user chose to keep working in despite a drift note. */
   keepGoing: string[]
+  /** Every session working on this project, by session id: its name and its own position in the plan. */
+  sessions?: Record<string, AtlasSession>
 }
+
+export type AtlasSession = { name: string; focus: string[]; t: number }
 
 export type AtlasTab = 'map' | 'pipeline' | 'glossary' | 'trail'
 
