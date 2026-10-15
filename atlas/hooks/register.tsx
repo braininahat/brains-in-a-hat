@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren, ToolCallResult } from 'claude-code'
 
-import type { AtlasMap, AtlasNode, AtlasTab } from '../types'
+import type { AtlasMap, AtlasNode, AtlasStage, AtlasTab } from '../types'
 import {
   age,
   applyPatch,
@@ -281,6 +281,16 @@ const BOOTSTRAP = `Build the atlas map for this project now (a cold start: the p
 4. Where your memory and the repository disagree, do not guess: add a trail note starting "Open question:" and list them for me at the end.
 Then show me the plan, in a few lines, as a tree.`
 
+/** What the stage buttons send: render a sample, or look at the one already there. */
+function sampleText(stage: AtlasStage): string {
+  const shape = stage.out ? ` Its output is ${stage.out}.` : ''
+  return `Render a sample of the "${stage.name}" pipeline stage's output.${shape} Load one real example, draw it in the form that fits its shape (an image or frame, a signal trace, a heat map for a matrix, a short table for scalars), show it with iris (id "stage-${stage.name}"), Read the PNG and say what is visible, then link it with atlas_update stages: [{name: "${stage.name}", figure: <the iris figure number>}].`
+}
+
+function lookText(stage: AtlasStage): string {
+  return `Look at iris figure #${stage.figure} for the "${stage.name}" stage: Read its PNG and tell me what is actually visible and whether anything looks wrong.`
+}
+
 /** The instructions the drift buttons send, as if typed. */
 function returnText(map: AtlasMap): string {
   const path = focusNodes(map)
@@ -328,6 +338,10 @@ export const register: Register = on => {
       lines.push(`atlas: ${bandLine(map, false)}${terms.length > 0 ? ` · Glossary: ${terms.join(', ')}` : ''} · atlas_update with no arguments returns the full map.`)
       if (map.recap) lines.push(`atlas recap: ${map.recap.where} Next: ${map.recap.next}`)
       if (map.drift) lines.push(`atlas: drift note on the step in focus: ${map.drift.note}`)
+      const unsampled = map.stages.filter(st => st.figure === undefined).map(st => st.name)
+      if (unsampled.length > 0) {
+        lines.push(`atlas: pipeline stages with no sample yet: ${unsampled.join(', ')}. When the work touches one of them, render one real example with iris and link it (stages[].figure).`)
+      }
       if (await read($, isStale)) {
         lines.push(`atlas: ${await read($, changes)} edits or commands since the map was last updated. Update the steps, facts and trail if they changed.`)
       }
@@ -714,6 +728,12 @@ export const register: Register = on => {
                 </Text>
               )}
               {s.note && <Text dimColor>{s.note}</Text>}
+              {s.figure === undefined && (
+                <Button key={`sample-${i}`} label="Generate sample" onPress={() => $.prompt.submit({ text: sampleText(s), asUser: true })} />
+              )}
+              {s.figure !== undefined && !isSeen && (
+                <Button key={`look-${i}`} label="Look at it" onPress={() => $.prompt.submit({ text: lookText(s), asUser: true })} />
+              )}
               {thumb}
             </Box>,
           ),
