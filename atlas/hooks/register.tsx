@@ -317,9 +317,16 @@ let lastKeeperAt = 0
 let turnsSinceKeeper = 0
 
 /** Upkeep the map needs now: stages without a sample, and a periodic fact and glossary check. */
-function keeperTasks(map: AtlasMap, root: string): string[] {
+async function keeperTasks($: EngineInterface, map: AtlasMap, root: string): Promise<string[]> {
   const tasks: string[] = []
-  for (const st of map.stages.filter(x => x.sample === undefined && x.figure === undefined).slice(0, 2)) {
+  const missing = []
+  // A stage needs a sample when it has none stored and its iris figure is gone (iris numbers do not outlive a session).
+  for (const st of map.stages) {
+    if (st.sample !== undefined && (await $.fs.exists(`${root}/${st.sample}`))) continue
+    if (st.figure !== undefined && (await irisPng($, st.figure))) continue
+    missing.push(st)
+  }
+  for (const st of missing.slice(0, 2)) {
     tasks.push(`Render a sample for the "${st.name}" stage${st.out ? ` (output ${st.out})` : ''} and save it at ${root}/${sampleRel(st.name)}.`)
   }
   if (turnsSinceKeeper >= KEEPER_CHECK_TURNS) tasks.push('Check the pinned facts against the repository, and add missing glossary entries from the recent turns.')
@@ -536,7 +543,7 @@ export const register: Register = on => {
       void watch($, 'haiku', turns.slice(-2)).catch(() => undefined)
       const map = await read($, mapAtom)
       if (!isEmpty(map) && (await $.clock.now()) - lastKeeperAt > KEEPER_EVERY_MS) {
-        void startKeeper($, keeperTasks(map, projectRoot)).catch(() => undefined)
+        void keeperTasks($, map, projectRoot).then(tasks => startKeeper($, tasks)).catch(() => undefined)
       }
     }
     return next(e)
