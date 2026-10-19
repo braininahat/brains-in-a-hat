@@ -49,7 +49,6 @@ declare module 'claude-code' {
       sel: IrisSelection
       view: 'preview' | 'source'
       zoom: IrisZoom
-      images: IrisImages
     }
   }
 }

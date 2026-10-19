@@ -13,7 +13,6 @@ const sel = atom({ plugin: 'iris', key: 'sel' } as const, null)
 const view = atom({ plugin: 'iris', key: 'view' } as const, 'preview')
 const FIT: IrisZoom = { z: 1, cx: 0.5, cy: 0.5 }
 const zoom = atom({ plugin: 'iris', key: 'zoom' } as const, FIT)
-const images = atom({ plugin: 'iris', key: 'images' } as const, 'unknown' as IrisImages)
 
 const SHOW_DESCRIPTION = [
   'Show a diagram or image to the user in the iris side pane, and get back a PNG of what they see.',
@@ -73,6 +72,8 @@ const renderLog: string[] = []
 let isProbe = false
 // When the renderer was last asked how an Image came out, and the viewport it was asked for.
 let probedAt = 0
+// What the viewer showed, kept outside $.state: a render may not set state, and asking again after a reload is cheap.
+let images: IrisImages = 'unknown'
 let probedViewport = ''
 const failedMtime = new Map<number, number>()
 const rasters = new Map<string, RasterCells | string>()
@@ -164,7 +165,7 @@ async function show($: EngineInterface, args: ShowArgs, isFromWatch = false): Pr
     $.ui.toast(`iris: #${n} ${fig.title} v${v} ready. /show to view`)
   }
   // Where the pane shows real pixels the full image is already in view; elsewhere open it once per figure.
-  if (v === 1 && !isFromWatch && (await read($, images)) === 'none') {
+  if (v === 1 && !isFromWatch && images === 'none') {
     await openExternal($, `${dir}/current.png`)
   }
   return { fig, version, png: rendered.png }
@@ -260,7 +261,7 @@ async function probeImages($: EngineInterface, key: string, source: ImageSource,
   await $.clock.sleep(300) // let the frame holding the Image land first
   const r = await $.ui.blit({ requestId: PANE, key, source, columns: box.columns, rows: box.rows }).catch(() => ({ deny: 'failed' }))
   const deny = r.deny ?? ''
-  const was = await read($, images)
+  const was = images
   let next = was
   if (deny === '') next = 'png' in source ? 'bytes' : 'file'
   // "this terminal cannot read files on this machine ... bytes still draw"
@@ -270,7 +271,7 @@ async function probeImages($: EngineInterface, key: string, source: ImageSource,
   // "has not yet said whether it reads files ... asked now, blit again"
   else if (/blit again/.test(deny)) probedAt = 0
   if (next !== was) {
-    await update($, images, () => next)
+    images = next
     $.ui.invalidate('ui.render')
     // One line per change, so how a viewer was judged can be checked afterwards.
     await sh($, ['sh', '-c', 'printf "%s %s -> %s (%s)\\n" "$(date -Is)" "$1" "$2" "$3" >> "$4"', 'iris', was, next, deny || 'drawn', `${base}/images.log`]).catch(() => undefined)
@@ -282,9 +283,9 @@ async function imagesFor($: EngineInterface, viewport: { columns: number; rows: 
   const vp = `${viewport?.columns}x${viewport?.rows}`
   if (vp !== probedViewport) {
     probedViewport = vp
-    if ((await read($, images)) === 'none') await update($, images, () => 'unknown' as IrisImages)
+    if (images === 'none') images = 'unknown'
   }
-  return (await read($, images)) !== 'none'
+  return images !== 'none'
 }
 
 async function cachedDims($: EngineInterface, file: string) {
@@ -440,7 +441,7 @@ export const register: Register = on => {
       if (!shown) {
         body = <Text dimColor>Preview failed. Press o to open the file.</Text>
       } else if (await imagesFor($, e.viewport)) {
-        const how = await read($, images)
+        const how = images
         const { Image } = $.ui.resolve(e)
         const box = fitCells(shown.w, shown.h, columns, fitRows)
         indent = Math.max(0, Math.floor((columns - box.columns) / 2))

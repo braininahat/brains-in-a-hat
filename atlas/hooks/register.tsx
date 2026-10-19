@@ -33,9 +33,6 @@ const isKeeping = atom({ plugin: 'atlas', key: 'isKeeping' } as const, false)
 // iris's state, read only: which figure the iris pane shows, and every figure's renders.
 const irisSel = atom({ plugin: 'iris', key: 'sel' } as const, null)
 const irisFigures = atom({ plugin: 'iris', key: 'figures' } as const, [])
-// How the viewing terminal shows pictures (see IrisImages): iris's answer, or atlas's own when atlas asked first.
-const irisImages = atom({ plugin: 'iris', key: 'images' } as const, 'unknown' as IrisImages)
-const images = atom({ plugin: 'atlas', key: 'images' } as const, 'unknown' as IrisImages)
 
 const RULES = `# atlas: keep the user oriented
 Long sessions drift: a big plan, a couple of steps done, then one step turns into its own search space and the session never returns to the top. The user may be a visual thinker who loses track of where things stand. The atlas map (goal, plan tree, facts, glossary, pipeline stages, parked tangents, trail) is shown beside the transcript and above the prompt. Keep it true with the atlas_update tool. The user is free to go anywhere; your job is to keep the books and the way back.
@@ -148,6 +145,8 @@ let fileMtime = 0
 const SESSION_MAX_AGE_MS = 14 * 86_400_000
 let workDir = '/tmp/atlas'
 let probedAt = 0
+// How the viewing terminal shows pictures (see IrisImages), kept outside $.state: a render may not set state.
+let images: IrisImages = 'unknown'
 let probedViewport = ''
 const dims = new Map<string, { w: number; h: number }>()
 // The last few main-thread turns, as the watchdog reads them. Rebuilt after a reload.
@@ -186,7 +185,8 @@ async function save($: EngineInterface, map: AtlasMap) {
   map = { ...map, sessions }
   await update($, mapAtom, () => map)
   const ignore = `${projectRoot}/.claude/atlas/.gitignore`
-  if (!(await $.fs.exists(ignore))) await $.fs.write(ignore, '# Written by atlas: the lock and half-written files never belong in git.\n.lock/\n*.tmp-*\nmap.unreadable-*.json\n')
+  const ignored = (await $.fs.exists(ignore)) ? await $.fs.read(ignore) : ''
+  if (!ignored.includes('inbox/')) await $.fs.write(ignore, '# Written by atlas: the lock, the inbox and half-written files never belong in git.\n.lock/\ninbox/\n*.tmp-*\nmap.unreadable-*.json\n')
   await writeWhole($, mapFile(projectRoot), `${JSON.stringify(map, null, 2)}\n`)
   fileMtime = (await $.fs.stat(mapFile(projectRoot)).catch(() => undefined))?.mtimeMs ?? fileMtime
   const notes = isEmpty(map) ? '' : toMarkdown(map, await read($, seen))
@@ -225,6 +225,46 @@ async function mutate($: EngineInterface, change: (map: AtlasMap) => AtlasMap): 
     return next
   } finally {
     if (isLocked) await maplock($, 'drop', dir)
+  }
+}
+
+const inboxDir = (root: string) => `${root}/.claude/atlas/inbox`
+const PATCH_FIELDS = new Set(Object.keys(MAP_SCHEMA.properties))
+let isApplyingInbox = false
+
+/**
+ * Applies map changes queued as files in .claude/atlas/inbox/. A background agent's call to a plugin tool
+ * goes straight to the tool's server and skips this plugin's hooks, so the keeper writes files instead.
+ */
+async function applyInbox($: EngineInterface) {
+  if (isApplyingInbox) return
+  isApplyingInbox = true
+  try {
+    const dir = inboxDir(projectRoot)
+    const entries = await $.fs.list(dir).catch(() => [])
+    const files = entries.filter(f => f.kind === 'file' && f.name.endsWith('.json') && !f.name.startsWith('.')).sort((a, b) => a.name.localeCompare(b.name))
+    for (const f of files) {
+      const path = `${dir}/${f.name}`
+      let patch: Patch | undefined
+      try {
+        const raw: unknown = JSON.parse(await $.fs.read(path))
+        if (raw !== null && typeof raw === 'object' && !Array.isArray(raw) && Object.keys(raw).every(k => PATCH_FIELDS.has(k))) patch = raw as Patch
+      } catch {
+        // Not JSON: set aside below.
+      }
+      if (patch) {
+        const change = patch
+        const now = await $.clock.now()
+        await mutate($, m => applyPatch(m, change, now))
+        await $.process.run(['rm', '-f', path]).catch(() => undefined)
+      } else {
+        // Keep a bad file for a look, out of the way of the next pass.
+        await $.process.run(['mv', '-f', path, `${dir}/.rejected-${f.name}`]).catch(() => undefined)
+        $.ui.toast(`atlas: set aside ${f.name} from the inbox; it is not a map change.`)
+      }
+    }
+  } finally {
+    isApplyingInbox = false
   }
 }
 
@@ -289,15 +329,14 @@ function withSamples(map: AtlasMap, copied: ReadonlyMap<string, string>): AtlasM
   return { ...map, stages: map.stages.map(st => (copied.has(st.name) && st.figure !== undefined ? { ...st, sample: copied.get(st.name) } : st)) }
 }
 
-/** How to draw pictures for this viewer: atlas's own probe if it has one, else iris's; a new viewport asks again. */
-async function imageMode($: EngineInterface, viewport: { columns: number; rows: number } | undefined): Promise<IrisImages> {
+/** How to draw pictures for this viewer, as atlas's probe found; a new viewport may be a new viewer, so ask again. */
+function imageMode(viewport: { columns: number; rows: number } | undefined): IrisImages {
   const vp = `${viewport?.columns}x${viewport?.rows}`
   if (vp !== probedViewport) {
     probedViewport = vp
-    await update($, images, () => 'unknown' as IrisImages)
+    images = 'unknown'
   }
-  const own = await read($, images)
-  return own !== 'unknown' ? own : read($, irisImages)
+  return images
 }
 
 /** An Image source for a PNG in the form this viewer reads. */
@@ -313,14 +352,14 @@ async function probeImages($: EngineInterface, key: string, source: ImageSource,
   await $.clock.sleep(300)
   const r = await $.ui.blit({ requestId: PANE, key, source, columns, rows }).catch(() => ({ deny: 'failed' }))
   const deny = r.deny ?? ''
-  const was = await read($, images)
+  const was = images
   let next = was
   if (deny === '') next = 'png' in source ? 'bytes' : 'file'
   else if (/cannot read files/.test(deny)) next = 'bytes'
   else if (/draws its alt|not drawn under a terminal/.test(deny) && !/in use/.test(deny)) next = 'none'
   else if (/blit again/.test(deny)) probedAt = 0
   if (next !== was) {
-    await update($, images, () => next)
+    images = next
     $.ui.invalidate('ui.render')
   }
 }
@@ -421,15 +460,15 @@ const KEEPER_PROMPT = `You are the atlas keeper. You keep the project's atlas ma
 Rules:
 - Read anything in the project. Write files only inside .claude/atlas/ (sample images). Never edit project code, configs or data; never run training, long jobs, installs, or git commands that change anything.
 - Finish within a few minutes of work. Do the tasks you are given and nothing else.
-- Change the map only through the atlas_update tool. Use full names; capitalise the first word of every label.
+- Change the map only by writing a JSON file into the inbox folder given in the task: one object with the same fields as the atlas_update tool, for example {"stages": [{"name": "Crop", "sample": ".claude/atlas/samples/crop.png", "note": "..."}]}. Write it under a name starting with a dot, then mv it to a name ending in .json, so it is never read half-written. The session applies it within a few seconds. (An atlas_update call from a background agent never reaches the map.) Use full names; capitalise the first word of every label.
 
 Rendering a stage sample:
 - Find one real example of the stage's output (the code, caches, run folders or result files tell you where). Draw it in the form that fits its shape: an image or frame, a signal trace (a few channels, a short window), a heat map for a matrix, a short table rendered as an image for scalars.
 - Use a short Python script run with: uv run --quiet --with matplotlib --with numpy python -I <script>. Put the script in /tmp, not in the project.
-- Save the PNG at the path given in the task, Read it, and only then call atlas_update with stages: [{name, sample: <path>, note: <one line saying what is visible>}].
+- Save the PNG at the path given in the task, Read it, and only then write an inbox file with stages: [{name, sample: <path>, note: <one line saying what is visible>}].
 - If you cannot find real data within a few tries, say so in the note and stop; never draw made-up data.
 
-Checking facts: compare pinned facts and the newest facts with the repository (git log, result and registry files). Fix wrong ones with atlas_update facts, and add a trail note saying what changed.
+Checking facts: compare pinned facts and the newest facts with the repository (git log, result and registry files). Fix wrong ones with an inbox file setting facts, with a trail note saying what changed.
 
 Glossary: add any abbreviation, run-ID prefix or nickname from the recent turns that the glossary lacks.
 
@@ -447,10 +486,19 @@ async function keeperTasks($: EngineInterface, map: AtlasMap, root: string): Pro
   const tasks: string[] = []
   const missing = []
   // A stage needs a sample when it has none stored and its iris figure is gone (iris numbers do not outlive a session).
+  const found: string[] = []
   for (const st of map.stages) {
     if (st.sample !== undefined && (await $.fs.exists(`${root}/${st.sample}`))) continue
+    // A render already on disk (say, from a keeper whose map update was lost) is linked, not drawn again.
+    if (await $.fs.exists(`${root}/${sampleRel(st.name)}`)) {
+      found.push(st.name)
+      continue
+    }
     if (st.figure !== undefined && (await irisPng($, st.figure))) continue
     missing.push(st)
+  }
+  if (found.length > 0) {
+    await mutate($, m => ({ ...m, stages: m.stages.map(st => (found.includes(st.name) && st.sample === undefined ? { ...st, sample: sampleRel(st.name) } : st)) }))
   }
   for (const st of missing.slice(0, 2)) {
     tasks.push(`Render a sample for the "${st.name}" stage${st.out ? ` (output ${st.out})` : ''} and save it at ${root}/${sampleRel(st.name)}.`)
@@ -465,6 +513,7 @@ async function startKeeper($: EngineInterface, tasks: string[]) {
   const recent = turns.slice(-3).map((t, i) => `Turn ${i + 1}. User: ${t.prompt}\nActions: ${t.actions.join('; ')}\nAssistant: ${t.answer}`).join('\n\n')
   const prompt = [
     `Project root: ${projectRoot}`,
+    `Inbox folder: ${inboxDir(projectRoot)}`,
     '',
     'Tasks:',
     ...tasks.map((t, i) => `${i + 1}. ${t}`),
@@ -578,7 +627,7 @@ export const register: Register = on => {
         name: 'keeper',
         description: 'Keeps the atlas map true in the background: renders missing stage samples, checks facts, fills the glossary.',
         prompt: KEEPER_PROMPT,
-        tools: ['Read', 'Glob', 'Grep', 'Bash', TOOL],
+        tools: ['Read', 'Glob', 'Grep', 'Bash'],
         model: 'sonnet',
         maxTurns: 30,
         background: true,
@@ -600,7 +649,7 @@ export const register: Register = on => {
     await update($, isKeeping, () => false)
     // Other sessions on this project write the same map; pick their changes up within a few seconds.
     refreshTimer?.cancel()
-    refreshTimer = $.clock.every(3000, () => void latest($).catch(() => undefined))
+    refreshTimer = $.clock.every(3000, () => void latest($).then(() => applyInbox($)).catch(() => undefined))
     await $.command.register({ name: 'atlas', description: 'Open the atlas map. /atlas init builds one for a project with history; /atlas reset clears it; /atlas recap runs a deep recap; /atlas project <path> switches project.', argumentHint: '[init | reset | recap | project <path>]' })
 
     return next(e)
@@ -886,7 +935,7 @@ export const register: Register = on => {
         </Box>
       ))
     }
-    const how = e.surface === 'terminal' ? await imageMode($, e.viewport) : 'none'
+    const how = e.surface === 'terminal' ? imageMode(e.viewport) : 'none'
     const routeImage = async (key: string, steps: AtlasNode[], at: number, prefix: string) => {
       if (how === 'none' || e.surface !== 'terminal' || steps.length === 0) return null
       const png = await routePng($, steps, at, prefix).catch(() => undefined)

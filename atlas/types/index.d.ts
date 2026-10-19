@@ -85,8 +85,6 @@ declare module 'claude-code' {
       isInitDismissed: boolean
       /** True while the keeper agent is working in the background. */
       isKeeping: boolean
-      /** How the viewing terminal shows pictures, as atlas's own probe found (same values as iris's). */
-      images: IrisImages
     }
   }
 }
