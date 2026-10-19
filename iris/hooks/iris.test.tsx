@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { packHalfBlocks, TERMINAL_DEFAULT, UPPER_HALF } from './raster'
-import { basename, cropWindow, dirname, extOf, fitCells, parsePages, tail } from './render'
+import { basename, cropWindow, dirname, embeddedSvg, extOf, fitCells, parsePages, SVG_LIMIT, tail, vectorSource } from './render'
 
 const words = (cells: string) => Array.from(new Uint32Array(Uint8Array.fromBase64(cells).buffer))
 
@@ -72,4 +72,18 @@ test('cropWindow stays inside the image at the edges', async () => {
   expect(cropWindow(1000, 500, 2, 0.5, 0.5)).toEqual({ cw: 500, ch: 250, x: 250, y: 125 })
   expect(cropWindow(1000, 500, 2, 0, 0)).toEqual({ cw: 500, ch: 250, x: 0, y: 0 })
   expect(cropWindow(1000, 500, 4, 1, 1)).toEqual({ cw: 250, ch: 125, x: 750, y: 375 })
+})
+
+test('desktop pictures: a plain vector is used whole, a styled or oversized one is not', async () => {
+  expect(vectorSource('<?xml version="1.0"?>\n<svg width="10"><g/></svg>')).toBe('<svg width="10"><g/></svg>')
+  expect(vectorSource('<svg><style>.a{fill:red}</style></svg>')).toBeUndefined()
+  expect(vectorSource(`<svg>${'x'.repeat(SVG_LIMIT)}</svg>`)).toBeUndefined()
+  expect(vectorSource(undefined)).toBeUndefined()
+})
+
+test('desktop pictures: an embedded raster keeps the aspect and never grows past the picture', async () => {
+  const doc = embeddedSvg('QUJD', 'image/png', 900, 600, 1600)
+  expect(doc).toContain('viewBox="0 0 900 600"')
+  expect(doc).toContain('href="data:image/png;base64,QUJD"')
+  expect(embeddedSvg('QUJD', 'image/jpeg', 3200, 1600, 1200)).toContain('viewBox="0 0 1200 600"')
 })

@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ImageSource, Register } from 'claude-code'
 
 import type { IrisFigure, IrisImages, IrisVersion, IrisZoom } from '../types'
-import { basename, convert, crop, dimsOf, dirname, extOf, fitCells, rasterize, renderPdfPage, TEXT_EXTS } from './render'
+import { basename, convert, crop, dimsOf, dirname, embeddedSvg, extOf, fitCells, rasterize, renderPdfPage, SVG_LIMIT, TEXT_EXTS, vectorSource } from './render'
 import type { RasterCells } from './raster'
 
 const PANE = 'iris'
@@ -304,6 +304,40 @@ async function zoomed($: EngineInterface, png: string, z: IrisZoom) {
   return crop($, png, full.w, full.h, z.z, z.cx, z.cy)
 }
 
+// Raster sizes tried for the desktop, largest first: PNG keeps diagrams sharp; JPEG fits photos and big pages.
+const DESKTOP_TRIES = [
+  [1600, 'png'],
+  [1200, 'png'],
+  [1600, 'jpg'],
+  [1200, 'jpg'],
+  [900, 'jpg'],
+  [600, 'jpg'],
+] as const
+const desktopDocs = new Map<string, string>()
+
+/**
+ * The picture as an SVG document for the desktop surface. A Graphviz figure keeps its own vector (it needs
+ * no stylesheet). Anything else is its PNG embedded at the largest size that fits the Svg limit.
+ */
+async function desktopSvg($: EngineInterface, file: string, w: number, h: number, vector?: string): Promise<string | undefined> {
+  const own = vector?.endsWith('.svg') ? vectorSource(await $.fs.read(vector).catch(() => undefined)) : undefined
+  if (own !== undefined) return own
+  const cacheKey = `${file}:${w}x${h}`
+  const known = desktopDocs.get(cacheKey)
+  if (known !== undefined) return known
+  for (const [width, kind] of DESKTOP_TRIES) {
+    const out = `${file}.desktop-${width}.${kind}`
+    const flatten = kind === 'jpg' ? ['-background', 'white', '-flatten', '-quality', '82'] : []
+    await sh($, ['magick', file, '-resize', `${width}x>`, ...flatten, out]).catch(() => undefined)
+    const bytes = await $.fs.read(out, { as: 'bytes' }).catch(() => undefined)
+    if (bytes === undefined || bytes.base64.length + 300 > SVG_LIMIT) continue
+    const doc = embeddedSvg(bytes.base64, kind === 'jpg' ? 'image/jpeg' : 'image/png', w, h, width)
+    desktopDocs.set(cacheKey, doc)
+    return doc
+  }
+  return undefined
+}
+
 const ZOOM_STEP = 1.5
 const MAX_ZOOM = 12
 
@@ -490,8 +524,18 @@ export const register: Register = on => {
             <Raster key="preview" columns={raster.columns} rows={raster.rows} cells={raster.cells} />
           )
       }
+    } else if (e.surface === 'desktop') {
+      const { Svg } = $.ui.resolve(e)
+      const shown = await zoomed($, png, z).catch(() => undefined)
+      // The vector only for the whole picture: a zoomed view is a crop of the PNG.
+      const doc = shown ? await desktopSvg($, shown.file, shown.w, shown.h, z.z <= 1 ? version.vector : undefined) : undefined
+      body = doc ? (
+        <Svg source={doc} alt={`#${fig.n} ${fig.title}`} />
+      ) : (
+        <Text dimColor>Preview failed. Press Open for the full image.</Text>
+      )
     } else {
-      body = <Text dimColor>Preview is drawn in the terminal only. Press Open for the full image.</Text>
+      body = <Text dimColor>This surface shows no pictures. Press Open for the full image.</Text>
     }
 
     const recent = list.slice(-8).reverse()

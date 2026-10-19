@@ -38,9 +38,9 @@ export function routeSvg(steps: readonly AtlasNode[], current: number, prefix = 
   const y = 78
   const x = (i: number) => (n === 1 ? ROUTE_W / 2 : margin + (i * (ROUTE_W - 2 * margin)) / (n - 1))
   const parts: string[] = [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${ROUTE_W}" height="${ROUTE_H}" viewBox="0 0 ${ROUTE_W} ${ROUTE_H}">`,
+    // The font as an inherited attribute, not a <style> block, so a surface that scrubs stylesheets keeps it.
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${ROUTE_W}" height="${ROUTE_H}" viewBox="0 0 ${ROUTE_W} ${ROUTE_H}" font-family="'TeX Gyre Heros', Helvetica, Arial, sans-serif">`,
     `<rect width="100%" height="100%" fill="#FFFFFF"/>`,
-    `<style>text{font-family:'TeX Gyre Heros',Helvetica,Arial,sans-serif}</style>`,
   ]
   for (let i = 0; i < n - 1; i++) {
     const isDone = steps[i]?.status === 'done' && steps[i + 1]?.status !== 'todo'

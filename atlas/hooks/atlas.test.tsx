@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { applyPatch, bandLine, breadcrumb, EMPTY, focusLabel, focusNodes, isEmpty, migrate, toMarkdown } from './model'
+import { routeSvg } from './route'
 import { parseWatch } from './watch'
 
 const T0 = 1_000_000
@@ -112,4 +113,11 @@ test('a stage keeps its seen mark until it gets a new sample', async () => {
   map = applyPatch(map, { stages: [{ name: 'Crop', figure: 4 }] }, T0 + 3)
   expect(map.stages[0]?.seenAt).toBeUndefined()
   expect(toMarkdown(map, [])).toContain('- Crop: [figure #4, not looked at yet] Fan geometry fixed')
+})
+
+test('the route picture carries its font as an attribute, with no stylesheet a surface could scrub', async () => {
+  const map = applyPatch(EMPTY, { steps: ['Load', 'Crop fan'] }, T0)
+  const svg = routeSvg(map.plan, 0, '')
+  expect(svg).not.toContain('<style')
+  expect(svg).toContain('font-family=')
 })

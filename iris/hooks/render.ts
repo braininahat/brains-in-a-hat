@@ -172,3 +172,23 @@ export async function rasterize(
   const { base64 } = await $.fs.read(raw, { as: 'bytes' })
   return packHalfBlocks(Uint8Array.fromBase64(base64), w ?? columns, h ?? 1)
 }
+
+/** The desktop surface draws pictures as Svg, whose source may be at most this many characters. */
+export const SVG_LIMIT = 131_072
+
+/**
+ * An SVG file's text as an Svg element's source, or undefined when it cannot be one: too long, or styled by a
+ * <style> block (mermaid's are), which a surface that scrubs stylesheets would draw unstyled.
+ */
+export function vectorSource(text: string | undefined): string | undefined {
+  const at = text?.indexOf('<svg') ?? -1
+  const doc = text !== undefined && at >= 0 ? text.slice(at) : undefined
+  return doc !== undefined && doc.length <= SVG_LIMIT && !doc.includes('<style') ? doc : undefined
+}
+
+/** A raster embedded in an SVG document of the picture's own size, at most `width` pixels across. */
+export function embeddedSvg(base64: string, mime: string, w: number, h: number, width: number): string {
+  const ww = Math.min(width, w)
+  const hh = Math.max(1, Math.round((h * ww) / w))
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${ww} ${hh}" width="${ww}" height="${hh}"><image href="data:${mime};base64,${base64}" width="${ww}" height="${hh}"/></svg>`
+}

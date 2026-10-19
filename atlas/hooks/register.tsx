@@ -418,6 +418,38 @@ function summarize(p: Patch | undefined): string {
 }
 
 /** A route picture for one level of the plan, rendered once per distinct content. */
+// The desktop draws thumbnails as Svg; each embedded picture is kept small, as a pane redraw sends them all.
+const THUMB_LIMIT = 60_000
+const THUMB_TRIES = [
+  [700, 'png'],
+  [500, 'png'],
+  [700, 'jpg'],
+  [500, 'jpg'],
+  [350, 'jpg'],
+] as const
+const thumbDocs = new Map<string, string>()
+
+/** A sample image as a small SVG document for the desktop surface: the PNG embedded at the largest size that fits. */
+async function thumbSvg($: EngineInterface, png: string, w: number, h: number, mtimeMs: number): Promise<string | undefined> {
+  const cacheKey = `${png}:${mtimeMs}`
+  const known = thumbDocs.get(cacheKey)
+  if (known !== undefined) return known
+  for (const [width, kind] of THUMB_TRIES) {
+    const out = `${workDir}/thumb-${hash(cacheKey)}-${width}.${kind}`
+    const flatten = kind === 'jpg' ? ['-background', 'white', '-flatten', '-quality', '82'] : []
+    await $.process.run(['magick', png, '-resize', `${width}x>`, ...flatten, out], { timeoutMs: 20_000 }).catch(() => undefined)
+    const bytes = await $.fs.read(out, { as: 'bytes' }).catch(() => undefined)
+    if (bytes === undefined || bytes.base64.length + 300 > THUMB_LIMIT) continue
+    const ww = Math.min(width, w)
+    const hh = Math.max(1, Math.round((h * ww) / w))
+    const mime = kind === 'jpg' ? 'image/jpeg' : 'image/png'
+    const doc = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${ww} ${hh}" width="${ww}" height="${hh}"><image href="data:${mime};base64,${bytes.base64}" width="${ww}" height="${hh}"/></svg>`
+    thumbDocs.set(cacheKey, doc)
+    return doc
+  }
+  return undefined
+}
+
 async function routePng($: EngineInterface, steps: AtlasNode[], current: number, prefix: string): Promise<string> {
   const svg = routeSvg(steps, current, prefix)
   const png = `${workDir}/route-${hash(svg)}.png`
@@ -937,7 +969,12 @@ export const register: Register = on => {
     }
     const how = e.surface === 'terminal' ? imageMode(e.viewport) : 'none'
     const routeImage = async (key: string, steps: AtlasNode[], at: number, prefix: string) => {
-      if (how === 'none' || e.surface !== 'terminal' || steps.length === 0) return null
+      if (steps.length === 0) return null
+      if (e.surface === 'desktop') {
+        const { Svg } = $.ui.resolve(e)
+        return <Svg key={key} source={routeSvg(steps, at, prefix)} alt="Plan route" />
+      }
+      if (how === 'none' || e.surface !== 'terminal') return null
       const png = await routePng($, steps, at, prefix).catch(() => undefined)
       if (!png) return null
       const { Image } = $.ui.resolve(e)
@@ -1104,7 +1141,17 @@ export const register: Register = on => {
         const isSeen = s.seenAt !== undefined || (s.figure !== undefined && looked.includes(s.figure))
         const colour = !hasSample ? GREY : isSeen ? GREEN : ORANGE
         let thumb = null
-        if (how === 'none' && hasSample && e.surface === 'terminal') {
+        if (hasSample && e.surface === 'desktop') {
+          const stored = s.sample ? `${projectRoot}/${s.sample}` : undefined
+          const png = stored && (await $.fs.exists(stored)) ? stored : s.figure !== undefined ? await irisPng($, s.figure) : undefined
+          const st = png ? await $.fs.stat(png).catch(() => undefined) : undefined
+          const d = png ? await pngDims($, png).catch(() => undefined) : undefined
+          const doc = png && d && st ? await thumbSvg($, png, d.w, d.h, st.mtimeMs) : undefined
+          if (doc) {
+            const { Svg } = $.ui.resolve(e)
+            thumb = <Svg key={`thumb-${i}`} source={doc} alt={`${s.name} sample`} />
+          }
+        } else if (how === 'none' && hasSample && e.surface === 'terminal') {
           thumb = <Text dimColor>This terminal shows no pictures; Look at it describes the sample, or open {s.sample ?? `figure #${s.figure}`}.</Text>
         } else if (hasSample && e.surface === 'terminal') {
           const stored = s.sample ? `${projectRoot}/${s.sample}` : undefined
